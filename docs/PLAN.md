@@ -7,9 +7,16 @@
 - [x] Implementar importação/exportação de projeto XML próprio com validação.
 - [x] Validar unidades, API, navegador, segurança de entradas e build Docker.
 - [x] Documentar instalação, arquitetura, limitações e reprodução do ambiente.
-- [ ] Registrar commits e verificar publicação em socratesmarques/headbop-ai.
+- [x] Registrar commits e verificar publicação em socratesmarques/headbop-ai.
 
 Decisões: processamento local, sem APIs externas ou modelos baixados; Librosa para
 áudio, OpenCV Haar/GrabCut para recorte com seleção manual; preview pelo mesmo MP4
 exportado. Compatibilidade com XML Alight Motion não será alegada sem arquivo e
-aplicativo reais para validar. O XML Headbop será um fallback portátil documentado.
+aplicativo reais para validar. O XML Headbop é um fallback portátil documentado.
+
+Entrega publicada em `main`: https://github.com/socratesmarques/headbop-ai.
+O commit inicial `76619e5` foi confirmado por consulta ao remoto após o push.
+Não foi aberto PR porque o repositório estava vazio e não tinha branch de destino.
+Instruções `install_script` e `start_skill` foram salvas no rascunho do ambiente;
+a publicação do snapshot na interface e a restauração em outra tarefa não foram
+executadas. A execução remota da CI ainda não foi consultada.
