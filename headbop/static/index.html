@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#10110e">
+  <meta name="description" content="Transforme música e imagem em movimento. Analise batidas, ajuste a animação e exporte seu vídeo com Headbop AI.">
+  <title>Headbop AI — Imagem no ritmo</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#studio">Ir para o estúdio</a>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="Headbop AI, início"><span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i><i></i></span>headbop<span class="brand-ai">AI</span></a>
+    <div class="header-right"><span class="local-badge"><span class="status-dot"></span>Processamento no servidor local</span><button id="import-button" class="button button-quiet" type="button"><span aria-hidden="true">↗</span> Abrir projeto</button><input id="import-file" type="file" accept=".xml,application/xml,text/xml" hidden></div>
+  </header>
+
+  <main id="studio">
+    <section class="intro" aria-labelledby="page-title">
+      <div><p class="eyebrow"><span></span> IMAGEM + MÚSICA + MOVIMENTO</p><h1 id="page-title">Sua imagem.<br> Um novo <em>ritmo.</em></h1><p class="intro-copy">Encontre a batida. Ajuste o movimento. Dê play.</p></div>
+      <div class="intro-aside"><span class="studio-label">HEADBOP STUDIO</span><span class="edition">01 / CRIE NO SEU TEMPO</span><div class="mini-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+    </section>
+
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+    <div class="studio-grid">
+      <aside class="controls" aria-label="Controles de criação">
+        <section class="panel source-panel" aria-labelledby="source-title">
+          <div class="section-heading"><h2 id="source-title"><span class="step">01</span> Seus arquivos</h2><span class="micro-label">COMECE AQUI</span></div>
+          <form id="upload-form">
+            <label class="file-drop" id="image-drop" for="image-file"><span class="upload-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m4 18 6-6 4 4 3-3 4 5"/></svg></span><span class="file-description"><strong id="image-name">Escolha uma imagem</strong><span>PNG, JPEG ou WebP · até 20 MB</span></span><span class="file-add" aria-hidden="true">+</span><input id="image-file" name="image" type="file" accept="image/png,image/jpeg,image/webp" required></label>
+            <label class="file-drop" id="audio-drop" for="audio-file"><span class="upload-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M9 17V5l11-2v12M9 8l11-2"/><ellipse cx="5.5" cy="17.5" rx="3.5" ry="2.5"/><ellipse cx="16.5" cy="15.5" rx="3.5" ry="2.5"/></svg></span><span class="file-description"><strong id="audio-name">Escolha sua música</strong><span>Áudio · de 0,5 a 30 s · até 20 MB</span></span><span class="file-add" aria-hidden="true">+</span><input id="audio-file" name="audio" type="file" accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg,.aac" required></label>
+            <button id="analyze-button" class="button button-primary full-width" type="submit" disabled><span aria-hidden="true">✦</span> Analisar e criar <span aria-hidden="true">→</span></button>
+          </form>
+          <p class="small-note">Os arquivos ficam neste servidor, sem envio a serviços de IA. Sessões temporárias; baixe o projeto para guardar.</p>
+        </section>
+
+        <section class="panel motion-panel" aria-labelledby="motion-title">
+          <div class="section-heading"><h2 id="motion-title"><span class="step">02</span> O movimento</h2><span class="micro-label">FAÇA DO SEU JEITO</span></div>
+          <fieldset id="animation-controls" disabled>
+            <legend class="sr-only">Configuração da animação</legend>
+            <div class="control-label">O que vai se mover</div>
+            <div class="segmented" role="group" aria-label="Área animada"><button class="segment-button active" data-mode="whole" type="button" aria-pressed="true">Imagem inteira</button><button class="segment-button" data-mode="subject" type="button" aria-pressed="false">Cabeça / personagem</button></div>
+            <div id="segmentation-info" class="segmentation-info" hidden><p id="segmentation-message"></p><button id="select-region" class="text-button" type="button">Selecionar área na imagem <span aria-hidden="true">↗</span></button></div>
+            <div class="control-label motion-label">Estilo da batida</div>
+            <div class="motion-options" role="group" aria-label="Estilo de movimento"><button class="motion-option active" type="button" data-motion="smooth" aria-pressed="true"><span class="motion-glyph" aria-hidden="true">∿</span><strong>Smooth</strong><small>Fluido</small></button><button class="motion-option" type="button" data-motion="hard" aria-pressed="false"><span class="motion-glyph" aria-hidden="true">ϟ</span><strong>Hard</strong><small>Marcado</small></button><button class="motion-option" type="button" data-motion="velocity" aria-pressed="false"><span class="motion-glyph" aria-hidden="true">»</span><strong>Velocity</strong><small>Impulso</small></button></div>
+            <div class="tempo-row"><label for="bpm">Tempo <span>BPM</span></label><div class="number-control"><button id="bpm-down" type="button" aria-label="Diminuir BPM">−</button><input id="bpm" type="number" min="40" max="240" step="0.1" value="120" inputmode="decimal"><button id="bpm-up" type="button" aria-label="Aumentar BPM">+</button></div></div>
+            <div class="range-heading"><label for="intensity">Intensidade</label><output id="intensity-value" for="intensity">100%</output></div><input id="intensity" class="range" type="range" min="0" max="2" value="1" step="0.05"><div class="range-labels"><span>Sutil</span><span>Enérgico</span></div>
+          </fieldset>
+        </section>
+      </aside>
+
+      <section class="workspace" aria-label="Prévia e exportação">
+        <div class="preview-panel panel">
+          <div class="preview-header"><h2><span class="step">03</span> Veja acontecer</h2><span id="preview-state" class="preview-state">AGUARDANDO ARQUIVOS</span></div>
+          <div class="stage" id="stage">
+            <div id="stage-empty" class="stage-empty"><div class="empty-art" aria-hidden="true"><div class="orbit orbit-1"></div><div class="orbit orbit-2"></div><div class="record"><span></span></div><span class="floating-note note-one">♪</span><span class="floating-note note-two">♫</span></div><h3>Todo movimento começa<br>com uma boa batida.</h3><p>Adicione uma imagem e um trecho de música<br>para encontrar o seu ritmo.</p><span class="empty-tag">SEUS ARQUIVOS. SUA CRIAÇÃO.</span></div>
+            <canvas id="image-canvas" hidden aria-label="Imagem do projeto. Ao selecionar área, arraste sobre a cabeça ou personagem."></canvas>
+            <video id="preview-video" controls playsinline preload="metadata" hidden aria-label="Vídeo renderizado com áudio"></video>
+            <div id="render-overlay" class="render-overlay" hidden><span class="spinner" aria-hidden="true"></span><strong id="render-label">Preparando seu movimento…</strong><span>O preview será o mesmo arquivo da exportação.</span></div>
+          </div>
+          <div id="selection-toolbar" class="selection-toolbar" hidden><p>Arraste para envolver a cabeça ou personagem.<span> Inclua uma pequena margem de fundo.</span></p><div><button id="cancel-selection" class="button button-quiet" type="button">Cancelar</button><button id="apply-selection" class="button button-primary" type="button" disabled>Aplicar recorte</button></div></div>
+          <div class="preview-footer"><span><span class="tiny-dot"></span> <span id="preview-caption">Preview fiel ao MP4 exportado</span></span><span>24 FPS <span class="footer-separator">/</span> MP4</span></div>
+        </div>
+
+        <div class="beat-panel panel" aria-label="Análise musical"><div class="beat-heading"><div><span class="micro-label">MAPA DE BATIDAS</span><p id="beat-summary">A sua música define o movimento.</p></div><div class="beat-stat"><strong id="detected-bpm">—</strong><span>BPM DETECTADO</span></div><div class="beat-stat"><strong id="beat-count">—</strong><span>BATIDAS</span></div></div><canvas id="beat-canvas" height="64" aria-label="Intensidade das batidas detectadas"></canvas><div class="timeline-labels"><span>00:00</span><span id="duration-label">—</span></div></div>
+
+        <div class="export-panel"><div class="export-copy"><h2>Pronto para dar o play?</h2><p id="render-hint">Adicione seus arquivos para gerar a animação.</p></div><button id="render-button" class="button button-primary render-button" type="button" disabled><span aria-hidden="true">▶︎</span> Gerar preview</button></div>
+        <div class="download-row"><a id="download-video" class="button button-secondary disabled" href="#" download="headbop.mp4" aria-disabled="true"><span aria-hidden="true">↓</span> Baixar MP4</a><a id="download-project" class="button button-quiet disabled" href="#" download="headbop.xml" aria-disabled="true"><span aria-hidden="true">↓</span> Salvar projeto XML</a><button id="clear-project" class="text-button" type="button" disabled>Limpar sessão</button></div>
+        <p class="format-note"><span aria-hidden="true">ⓘ</span> XML é o formato próprio do Headbop, com imagem, áudio e animação. Compatibilidade com Alight Motion não verificada.</p>
+      </section>
+    </div>
+    <footer class="site-footer"><span>HEADBOP AI <span class="footer-separator">/</span> OPEN SOURCE</span><span>Feito para transformar ritmo em movimento.</span></footer>
+  </main>
+</body>
+</html>
