@@ -13,7 +13,9 @@ comparação real. Main e configuração publicada do ambiente serão preservada
 - [x] Integrar UI automática, máscaras, pivôs e controles opcionais.
 - [x] Validar unidades, API, navegador, renders CPU e Docker.
 - [x] Documentar Linux/Kali, Windows, decisões e limitações.
-- [ ] Entregar branch/PR e verificar CI remota; estado em [REPORT_V2.md](REPORT_V2.md).
+- [x] Publicar a branch de revisão, preservando main.
+- [x] Investigar e corrigir a falha de reprodução na CI; execução remota aprovada.
+- [ ] Abrir PR; criação bloqueada pela política de rede, estado em [REPORT_V2.md](REPORT_V2.md).
 
 Git fetch funciona. A API `api.github.com` respondeu CONNECT 403 pela política de
 rede. A página pública de Actions permitiu confirmar uma falha anterior no teste

@@ -124,6 +124,12 @@ python scripts/browser_smoke.py
 python scripts/render_comparison.py --help
 ```
 
+O navegador do smoke precisa reproduzir H.264/AAC. Algumas distribuições de
+Chromium não incluem esses codecs. Nesse caso, use Chrome instalado, por exemplo
+`HEADBOP_BROWSER_EXECUTABLE=/usr/bin/google-chrome python scripts/browser_smoke.py`
+no Linux. A CI usa o Chrome disponível no runner Ubuntu 24.04. A variável também
+aceita outro caminho de executável; `playwright` força o navegador empacotado.
+
 O smoke test cria seu próprio servidor e arquivos temporários; testa upload,
 preview, MP4, XML, controles e interação móvel. Screenshots e diagnósticos ficam
 em `test-results/` (ignorado pelo Git). A comparação de motores usa mídia sintética

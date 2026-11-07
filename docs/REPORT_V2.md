@@ -61,7 +61,9 @@ python scripts/render_comparison.py --output test-results/v2-final-comparison \
 - Smoke de navegador passou em desktop e Chromium móvel emulado: upload e render
   automático, controles, máscara/rig, seleção manual/touch, timeline, MP4 vertical
   720×1280 a 30 fps com áudio, download idêntico ao preview, XML v1/v2 e exclusão.
-  Nenhum erro JavaScript/CSP foi observado. Não equivale a Safari/iPhone físico.
+  Nenhum erro JavaScript/CSP foi observado. O fluxo foi repetido após o acabamento
+  dos controles, abas, seletores e timeline responsivos. Não equivale a
+  Safari/iPhone físico.
 - Docker construiu `headbop-ai:v2`, instalou o pacote 2.0.0 e executou a suíte como
   UID 10001: **279 passaram em 36,07 s** na imagem final, incluindo os casos de
   fallback/atualização antiga. A API local passou novamente nos 23 testes após
@@ -121,7 +123,10 @@ A CI passa a selecionar explicitamente `/usr/bin/google-chrome`, disponível no
 [runner oficial Ubuntu 24.04](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md).
 O teste continua exigindo reprodução do MP4 com áudio, sem trocar formato,
 silenciar a verificação ou ignorar o teste. A instalação de outro Chromium foi
-removida do workflow por não ser usada. A execução da correção está pendente.
+removida do workflow por não ser usada.
+O run [`42334780802`](https://github.com/socratesmarques/headbop-ai/actions/runs/42334780802)
+do commit `b86b926` **passou**, incluindo `test` (com reprodução no navegador) e
+`container`, confirmando a correção da falha de codecs observada na branch.
 
 ### Render reproduzível e desempenho
 
