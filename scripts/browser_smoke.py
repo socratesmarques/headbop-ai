@@ -263,7 +263,7 @@ def main():
                     browser = playwright.chromium.launch(executable_path=executable, headless=True)
                     print(f"Browser: {executable or 'Playwright bundled headless'}, version: {browser.version}", flush=True)
                     context = browser.new_context(
-                        viewport={"width": 1440, "height": 1100}, reduced_motion="reduce"
+                        viewport={"width": 1440, "height": 1100}, reduced_motion="reduce", locale="pt-BR"
                     )
                     page = context.new_page()
                     errors = []
@@ -271,6 +271,17 @@ def main():
                     mobile = None
                     try:
                         page.goto(base_url)
+                        # Localized UI, persistence, and reversible language switching.
+                        page.locator("#language-select").select_option("en")
+                        expect(page.locator("#source-title")).to_contain_text("Your files")
+                        page.reload()
+                        expect(page.locator("#language-select")).to_have_value("en")
+                        page.locator("#language-select").select_option("fr")
+                        expect(page.locator("#source-title")).to_contain_text("Vos fichiers")
+                        page.locator("#language-select").select_option("es")
+                        expect(page.locator("#source-title")).to_contain_text("Tus archivos")
+                        page.locator("#language-select").select_option("pt-BR")
+                        expect(page.locator("#source-title")).to_contain_text("Seus arquivos")
                         expect(page.locator("#analyze-button")).to_be_disabled()
                         assert page.locator('[data-motion="reference"]').count() == 0
                         no_overflow(page)
@@ -345,7 +356,7 @@ def main():
 
                         mobile = browser.new_context(
                             viewport={"width": 390, "height": 844}, is_mobile=True,
-                            has_touch=True, device_scale_factor=3, reduced_motion="reduce",
+                            has_touch=True, device_scale_factor=3, reduced_motion="reduce", locale="pt-BR",
                         )
                         mobile_page = mobile.new_page()
                         watch_errors(mobile_page, errors)
