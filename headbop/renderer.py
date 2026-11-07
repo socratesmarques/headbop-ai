@@ -267,6 +267,7 @@ def render_video(
     image_path: Path, foreground_path: Path | None, audio_path: Path,
     output_path: Path, keyframes: list[dict], duration: float, mode: str,
     *, settings: dict | None = None, rig: dict | None = None,
+    progress_callback=None,
 ) -> None:
     """Render H.264/AAC on CPU; old positional calls retain 640px/24fps behavior.
 
@@ -298,9 +299,13 @@ def render_video(
             process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=errors)
             assert process.stdin is not None
             try:
-                for number in range(math.ceil(duration * fps)):
+                total_frames = math.ceil(duration * fps)
+                interval = max(1, total_frames // 100)
+                for number in range(total_frames):
                     frame = _frame_transform(keyframes, number / fps)
                     process.stdin.write(_render_frame(scene, frame).tobytes())
+                    if progress_callback is not None and ((number + 1) % interval == 0 or number + 1 == total_frames):
+                        progress_callback(number + 1, total_frames)
             except BrokenPipeError as error:
                 raise RuntimeError("FFmpeg interrompeu a codificação do vídeo.") from error
             finally:
