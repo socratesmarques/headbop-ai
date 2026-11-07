@@ -1,0 +1,11 @@
+# Restricted testing environment with one shared credential.
+# Caddy provisions and renews HTTPS for the configured public domain.
+{$HEADBOP_DOMAIN} {
+  request_body {
+    max_size 60MB
+  }
+  basic_auth {
+    tester {$HEADBOP_BASIC_AUTH_HASH}
+  }
+  reverse_proxy app:8000
+}
