@@ -140,6 +140,30 @@ estado anterior ao [merge do PR #1](https://github.com/socratesmarques/headbop-a
 Consulte os resultados atuais na
 [CI da main](https://github.com/socratesmarques/headbop-ai/actions?query=branch%3Amain).
 
+
+## Idiomas e progresso
+
+A interface permite selecionar português, inglês, espanhol, francês, alemão,
+italiano, chinês simplificado e hindi. A escolha é lembrada pelo navegador
+quando o armazenamento local está habilitado. As principais mensagens são
+traduzidas no cliente, sem enviar texto para tradutores externos. Alguns erros
+gerados diretamente pelo backend ainda podem aparecer em português e devem
+ser revisados antes de um lançamento internacional definitivo.
+
+O carregamento de uploads e a análise inicial são **indeterminados**: não há
+porcentagem real disponível nessa etapa. Durante a geração do MP4, a API de
+status retorna `progress` (0–100) baseado em quadros processados, reservando
+os últimos 5% para a conclusão do FFmpeg. Isso **não é** uma previsão de tempo
+restante. O indicador chega a 100% somente com vídeo finalizado.
+
+## Publicação
+
+Consulte [o guia de implantação privada e a checklist de lançamento](docs/PRODUCTION.md).
+**Não exponha o aplicativo diretamente à internet sem controle de acesso**:
+esta versão ainda não oferece contas, isolamento por usuário nem quotas por
+usuário. Docker, HTTPS e uma senha compartilhada permitem uma demonstração
+restrita, mas não substituem essas funcionalidades em um serviço público.
+
 ## Configuração e privacidade
 
 | Variável | Padrão |
