@@ -1,4 +1,6 @@
 import math
+import hashlib
+import json
 
 import pytest
 
@@ -56,3 +58,16 @@ def test_source_energy_controls_movement():
 def test_reject_invalid_inputs(override):
     with pytest.raises(ValueError):
         frames(**override)
+
+
+@pytest.mark.parametrize("motion,digest", [
+    ("smooth", "9af16d73e9fb03f06ce30a00b873dff95509a17a687a8dab94620904623a7869"),
+    ("hard", "83d88f00eb18c9aa0d35c322bb688007193ef4245f6c7f8e675b3ad8b5aa1ecd"),
+    ("velocity", "ec9373f20c19e16c703f5b47b36372d6a78a67b166216e70c49b4d256f834149"),
+])
+def test_legacy_all_frame_values_match_pre_v2_baseline(motion, digest):
+    # Captured from the original engine: fractional duration/anchor, BPM
+    # override and unequal energies exercise every transform and interpolation.
+    result = generate_keyframes(2.125, [0.21, 0.71, 1.21, 1.71], [0.8, 0.1, 1, 0.2], 137, 1.3, motion)
+    encoded = json.dumps(result, separators=(",", ":"), sort_keys=True).encode()
+    assert hashlib.sha256(encoded).hexdigest() == digest

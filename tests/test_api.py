@@ -85,7 +85,7 @@ def test_complete_upload_render_export_import_delete(client, media):
     imported = client.post("/api/import", files={"file": ("project.xml", exported.content)})
     assert imported.status_code == 201, imported.text
     restored = imported.json()
-    assert restored["settings"] == settings
+    assert restored["settings"] == update.json()["settings"]
     assert restored["keyframes"] == update.json()["keyframes"]
     assert restored["segmentation"]["method"] == project["segmentation"]["method"]
     assert client.delete(prefix).status_code == 204
@@ -129,6 +129,12 @@ def test_failed_automatic_crop_still_allows_whole_image(client, media, monkeypat
     project = upload(client, media)
     assert not project["segmentation"]["available"]
     assert project["settings"]["mode"] == "whole"
+    exported = client.get(f'/api/projects/{project["id"]}/export')
+    assert exported.status_code == 200, exported.text
+    imported = client.post("/api/import", files={"file": ("fallback.xml", exported.content)})
+    assert imported.status_code == 201, imported.text
+    assert imported.json()["settings"]["mode"] == "whole"
+    assert imported.json()["keyframes"] == project["keyframes"]
 
 
 def test_render_failure_releases_project(client, media, monkeypatch):
@@ -153,3 +159,135 @@ def test_actual_body_size_guard(client, monkeypatch):
     response = client.post("/api/import", content=b"x" * 30,
                            headers={"content-length": "1", "content-type": "multipart/form-data; boundary=a"})
     assert response.status_code == 413
+
+
+def test_new_project_auto_and_capabilities(client, media):
+    project = upload(client, media)
+    assert project["settings"]["engine"] == "v2"
+    assert project["settings"]["motion"] == "auto"
+    assert project["settings"]["mode"] == "subject"  # Precise supplied alpha.
+    assert project["capabilities"]["reference_available"] is False
+    assert project["mask_url"] == project["foreground_url"]
+    assert "layers" in project["keyframes"][0]
+    assert "energy" in project["analysis"]
+
+
+def test_legacy_project_read_and_xml_roundtrip_preserve_frames(client, media):
+    from headbop.animation import generate_keyframes
+    project = upload(client, media)
+    store = client.app.state.store
+    original = store.read(project["id"])
+    original["settings"] = {"mode": "whole", "motion": "hard", "bpm": 120, "intensity": 1}
+    original.pop("rig", None)
+    for key in ("kind", "confidence", "head_rect"):
+        original["segmentation"].pop(key, None)
+    original["keyframes"] = generate_keyframes(4, original["analysis"]["beats"],
+                                               original["analysis"]["intensity"], 120, 1, "hard")
+    # Imported timelines must survive exactly, including manually edited samples.
+    original["keyframes"][5]["rotation"] = 3.14159
+    store.write(original)
+    prefix = f'/api/projects/{project["id"]}'
+    assert client.get(prefix).json()["settings"]["engine"] == "legacy"
+    assert "engine" not in store.read(project["id"])["settings"]  # Read is non-mutating.
+    assert "kind" not in store.read(project["id"])["segmentation"]
+    xml = client.get(prefix + "/export")
+    assert b'<headbop-project version="1">' in xml.content
+    imported = client.post("/api/import", files={"file": ("legacy.xml", xml.content)})
+    assert imported.status_code == 201, imported.text
+    assert imported.json()["keyframes"] == original["keyframes"]
+    assert imported.json()["settings"]["engine"] == "legacy"
+    upgraded = client.put(prefix + "/settings", json={**original["settings"], "engine": "v2"})
+    assert upgraded.status_code == 200, upgraded.text
+    xml_v2 = client.get(prefix + "/export")
+    assert xml_v2.status_code == 200, xml_v2.text
+    restored = client.post("/api/import", files={"file": ("upgraded.xml", xml_v2.content)})
+    assert restored.status_code == 201, restored.text
+    assert restored.json()["keyframes"] == upgraded.json()["keyframes"]
+    assert client.get(restored.json()["mask_url"]).content == client.get(project["mask_url"]).content
+
+
+def test_v2_output_controls_manual_rig_and_export(client, media):
+    project = upload(client, media)
+    prefix = f'/api/projects/{project["id"]}'
+    selected = {**project["settings"], "fps": 60, "resolution": 1080, "aspect": "vertical",
+                "motion": "smooth", "speed": 1.4, "easing": "ease-in-out", "squash": 0.7}
+    changed = client.put(prefix + "/settings", json=selected)
+    assert changed.status_code == 200, changed.text
+    assert len(changed.json()["keyframes"]) == 241
+    response = client.post(prefix + "/rig", json={"head_rect": [0.23, 0.12, 0.54, 0.4]})
+    assert response.status_code == 200, response.text
+    rigged = response.json()
+    assert rigged["rig"]["head_rect"] == [0.23, 0.12, 0.54, 0.4]
+    xml = client.get(prefix + "/export")
+    assert xml.status_code == 200, xml.text
+    assert b'<headbop-project version="2">' in xml.content
+    imported = client.post("/api/import", files={"file": ("v2.xml", xml.content)})
+    assert imported.status_code == 201, imported.text
+    restored = imported.json()
+    assert restored["settings"] == selected
+    assert restored["keyframes"] == rigged["keyframes"]
+    assert restored["rig"]["head_rect"] == rigged["rig"]["head_rect"]
+
+
+@pytest.mark.parametrize("option", [
+    {"fps": 120}, {"resolution": 2160}, {"aspect": "crop"}, {"speed": 0},
+    {"squash": 1.1}, {"motion": "reference"}, {"easing": "exec"},
+    {"engine": "legacy", "motion": "auto"},
+])
+def test_v2_rejects_unsupported_options(client, option):
+    response = client.put("/api/projects/" + "a" * 32 + "/settings", json={"bpm": 120, **option})
+    assert response.status_code == 422
+
+
+def test_xml_duration_must_match_embedded_audio(client, media):
+    from xml.etree import ElementTree as ET
+    project = upload(client, media)
+    xml = client.get(f'/api/projects/{project["id"]}/export').content
+    root = ET.fromstring(xml)
+    root.find("timeline").set("duration", "5")
+    response = client.post("/api/import", files={"file": ("wrong.xml", ET.tostring(root))})
+    assert response.status_code == 422
+
+
+def test_manual_rig_invalid_selection_is_rejected(client, media):
+    project = upload(client, media)
+    response = client.post(f'/api/projects/{project["id"]}/rig', json={"head_rect": [0, 0, 2, 1]})
+    assert response.status_code == 422
+
+
+def test_v2_xml_preserves_uniform_background_mask_and_render(client, media):
+    image = Image.new("RGBA", (128, 128), "white")
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((35, 10, 93, 68), fill="#ffbe75")
+    draw.rectangle((55, 56, 73, 90), fill="#ffbe75")
+    draw.rounded_rectangle((24, 77, 104, 120), radius=10, fill="#3157ce")
+    data = io.BytesIO()
+    image.save(data, format="PNG")
+    project = upload(client, (data.getvalue(), media[1]))
+    assert project["segmentation"]["method"] == "uniform-background"
+    prefix = f'/api/projects/{project["id"]}'
+    rigged = client.post(prefix + "/rig", json={"head_rect": [0.24, 0.04, 0.52, 0.52]}).json()
+    assert rigged["rig"]["kind"] == "head-body"
+    original_mask = client.get(rigged["foreground_url"]).content
+    exported = client.get(prefix + "/export")
+    assert exported.status_code == 200, exported.text
+    restored = client.post("/api/import", files={"file": ("avatar.xml", exported.content)})
+    assert restored.status_code == 201, restored.text
+    restored = restored.json()
+    assert restored["segmentation"]["method"] == "uniform-background"
+    assert restored["segmentation"]["kind"] == rigged["segmentation"]["kind"]
+    assert restored["rig"]["pivots"] == rigged["rig"]["pivots"]
+    assert client.get(restored["foreground_url"]).content == original_mask
+    videos = []
+    for current in (rigged, restored):
+        url = f'/api/projects/{current["id"]}'
+        assert client.post(url + "/render").status_code == 202
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            status = client.get(url + "/render").json()
+            if status["status"] in {"ready", "error"}:
+                break
+            time.sleep(0.05)
+        assert status["status"] == "ready", status
+        videos.append(client.get(url + "/video").content)
+    assert videos[0] == videos[1]

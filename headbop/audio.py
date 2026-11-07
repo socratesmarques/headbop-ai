@@ -1,4 +1,4 @@
-"""Local, bounded music analysis using Librosa and per-beat RMS energy."""
+"""Local, bounded music analysis with beat, energy and spectral heuristics."""
 
 from pathlib import Path
 
@@ -9,6 +9,95 @@ import soundfile as sf
 SAMPLE_RATE = 22050
 HOP_LENGTH = 256
 MAX_DURATION = 30.0
+
+
+def _rich_features(y: np.ndarray, envelope: np.ndarray, beats: np.ndarray, duration: float) -> dict:
+    """Measure features without assigning instrument or musical-genre labels.
+
+    The energy curve is RMS at approximately 86 Hz. Silence needs at least
+    350 ms below -35 dB relative to peak RMS (and an absolute noise floor).
+    Spectral low/high events describe frequency emphasis, not kick/snare hits.
+    """
+    frame_length = 1024
+    rms = librosa.feature.rms(y=y, frame_length=frame_length, hop_length=HOP_LENGTH)[0]
+    frame_times = librosa.frames_to_time(np.arange(len(rms)), sr=SAMPLE_RATE, hop_length=HOP_LENGTH)
+    maximum = max(float(np.max(rms)), 1e-10)
+    relative = np.clip(rms / maximum, 0, 1)
+    energy = [
+        {"time": round(float(time), 6), "value": round(float(value), 6)}
+        for time, value in zip(frame_times, relative)
+        if time < duration
+    ]
+    energy.append({"time": round(duration, 6), "value": round(float(relative[-1]), 6)})
+
+    # Centered analysis windows overlap by half their length. Report the
+    # conservative silent region rather than clipping an audible transient.
+    silent = rms < max(1e-5, maximum * 0.018)
+    silences = []
+    start = None
+    step = HOP_LENGTH / SAMPLE_RATE
+    for index in range(len(silent) + 1):
+        quiet = index < len(silent) and bool(silent[index])
+        if quiet and start is None:
+            start = max(0.0, float(frame_times[index]) - step / 2)
+        elif not quiet and start is not None:
+            end = min(duration, index * step - step / 2) if index < len(silent) else duration
+            if end - start >= 0.35:
+                silences.append([round(start, 6), round(end, 6)])
+            start = None
+
+    onset_frames = librosa.onset.onset_detect(
+        onset_envelope=envelope, sr=SAMPLE_RATE, hop_length=HOP_LENGTH,
+        units="frames", backtrack=False,
+    )
+    onset_times = librosa.frames_to_time(onset_frames, sr=SAMPLE_RATE, hop_length=HOP_LENGTH)
+    onset_times = onset_times[onset_times < duration]
+    onset_frames = onset_frames[:len(onset_times)]
+    spectrum = np.abs(librosa.stft(y, n_fft=frame_length, hop_length=HOP_LENGTH)) ** 2
+    frequencies = librosa.fft_frequencies(sr=SAMPLE_RATE, n_fft=frame_length)
+    bands = {
+        "low": np.sum(spectrum[(frequencies >= 30) & (frequencies < 220)], axis=0),
+        "high": np.sum(spectrum[(frequencies >= 1800) & (frequencies <= 9000)], axis=0),
+    }
+    # Onset strength has a small analysis delay; inspect neighboring spectral
+    # windows so brief transients are not assigned a zero band strength.
+    band_hits = {
+        kind: np.asarray([
+            np.max(values[max(0, int(frame) - 3):min(len(values), int(frame) + 2)])
+            for frame in onset_frames
+        ])
+        for kind, values in bands.items()
+    }
+    events = []
+    for index, time in enumerate(onset_times):
+        total = sum(float(values[index]) for values in band_hits.values())
+        for kind, values in band_hits.items():
+            peak = float(np.max(values)) if len(values) else 0.0
+            power = float(values[index])
+            if peak > 1e-10 and total > 1e-10 and power / total >= 0.28:
+                events.append({
+                    "time": round(float(time), 6), "kind": kind,
+                    "strength": round(min(1.0, float(np.sqrt(power / peak))), 6),
+                })
+
+    # Confidence expresses evidence supporting the measured grid. It is not a
+    # probability of a correct tempo: half/double-tempo ambiguity remains.
+    confidence = 0.0
+    if len(beats) >= 2 and len(onset_times) >= 2:
+        period = float(np.median(np.diff(beats)))
+        tolerance = min(0.09, period * 0.18)
+        distances = np.min(np.abs(beats[:, None] - onset_times[None, :]), axis=1)
+        alignment = float(np.mean(np.clip(1 - distances / max(tolerance, 1e-6), 0, 1)))
+        regularity = max(0.0, 1 - float(np.std(np.diff(beats))) / max(period, 1e-6))
+        support = min(1.0, len(onset_times) / 6)
+        confidence = support * (0.75 * alignment + 0.25 * regularity)
+    return {
+        "onsets": [round(float(time), 6) for time in onset_times],
+        "energy": energy,
+        "silences": silences,
+        "events": events,
+        "rhythm_confidence": round(float(np.clip(confidence, 0, 1)), 6),
+    }
 
 
 def analyze_audio(path: Path) -> dict:
@@ -74,4 +163,5 @@ def analyze_audio(path: Path) -> dict:
         "beats": [round(float(value), 6) for value in times],
         "intensity": [round(min(value / maximum, 1.0), 6) for value in energies],
         "duration": round(duration, 6),
+        **_rich_features(y, envelope, times, duration),
     }
