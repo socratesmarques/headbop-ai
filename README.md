@@ -4,6 +4,9 @@ Transforme uma imagem e um trecho de música em uma animação de headbop, usand
 Python/FastAPI, Librosa, OpenCV e FFmpeg na CPU. O preview reproduz o **mesmo MP4**
 que será baixado. Sem serviços externos obrigatórios, GPU, conta ou chaves de API.
 
+A versão 2.0 já está integrada à `main`. Os comandos de instalação abaixo usam
+essa branch.
+
 ## Fluxo de uso
 
 1. Selecione uma imagem PNG/JPEG/WebP e um áudio de 0,5 a 30 segundos.
@@ -54,10 +57,8 @@ necessário Node.js para executar a aplicação.
 ```bash
 sudo apt-get update
 sudo apt-get install -y python3-venv ffmpeg libsndfile1
-git clone https://github.com/socratesmarques/headbop-ai.git
+git clone --branch main https://github.com/socratesmarques/headbop-ai.git
 cd headbop-ai
-# Para experimentar esta evolução antes do merge:
-git switch feat/headbop-2-engine
 python3.12 -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements.lock
@@ -77,9 +78,8 @@ PowerShell, Python 3.12 e FFmpeg no `PATH`:
 winget install Python.Python.3.12
 winget install Gyan.FFmpeg
 # Abra um novo terminal após a instalação.
-git clone https://github.com/socratesmarques/headbop-ai.git
+git clone --branch main https://github.com/socratesmarques/headbop-ai.git
 cd headbop-ai
-git switch feat/headbop-2-engine
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.lock
 .\.venv\Scripts\python.exe -m pip install --no-deps -e .
@@ -134,8 +134,11 @@ O smoke test cria seu próprio servidor e arquivos temporários; testa upload,
 preview, MP4, XML, controles e interação móvel. Screenshots e diagnósticos ficam
 em `test-results/` (ignorado pelo Git). A comparação de motores usa mídia sintética
 reproduzível e produz vídeos e uma folha de quadros; consulte o `--help` para as
-opções e [relatório da evolução](docs/REPORT_V2.md) para resultados efetivamente
-executados, desempenho medido e situação da CI.
+opções e [relatório de implementação e validação](docs/REPORT_V2.md) para os
+resultados e o desempenho medidos durante a evolução. O relatório registra o
+estado anterior ao [merge do PR #1](https://github.com/socratesmarques/headbop-ai/pull/1).
+Consulte os resultados atuais na
+[CI da main](https://github.com/socratesmarques/headbop-ai/actions?query=branch%3Amain).
 
 ## Configuração e privacidade
 
@@ -158,7 +161,7 @@ compartilhá-lo compartilha seu conteúdo.
 Não há autenticação nem isolamento por usuário. Para exposição pública, adicione
 controle de acesso, HTTPS e limites de recursos. Arquivos temporários não têm
 backup automático. Mais detalhes em [arquitetura](docs/ARCHITECTURE.md),
-[limitações](docs/LIMITATIONS.md) e [plano](docs/ENGINE_V2_PLAN.md).
+[limitações](docs/LIMITATIONS.md) e [histórico do plano da evolução](docs/ENGINE_V2_PLAN.md).
 
 Licença [MIT](LICENSE). A fotografia usada em testes tem atribuição própria em
 [tests/fixtures/ATTRIBUTION.md](tests/fixtures/ATTRIBUTION.md).
