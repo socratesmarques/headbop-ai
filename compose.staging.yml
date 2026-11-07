@@ -1,0 +1,44 @@
+# Restricted staging only. Not a public multi-user production deployment.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    init: true
+    environment:
+      HEADBOP_DATA_DIR: /data
+      HEADBOP_TTL_HOURS: "24"
+      HEADBOP_MAX_PROJECTS: "30"
+    volumes:
+      - headbop_data:/data
+    expose:
+      - "8000"
+    cpus: 2.0
+    mem_limit: 4g
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      HEADBOP_DOMAIN: ${HEADBOP_DOMAIN:?Set the public domain}
+      HEADBOP_BASIC_AUTH_HASH: ${HEADBOP_BASIC_AUTH_HASH:?Set a Caddy password hash}
+    volumes:
+      - ./Caddyfile.staging:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  headbop_data:
+  caddy_data:
+  caddy_config:
