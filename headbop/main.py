@@ -10,7 +10,6 @@ import warnings
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
 
 import soundfile as sf
 from fastapi import FastAPI, HTTPException, Request, UploadFile
@@ -19,11 +18,13 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel, ConfigDict, Field
 
-from .animation import generate_keyframes
+from .animation import generate_keyframes, generate_motion
 from .audio import analyze_audio
 from .formats import export_project, import_project
 from .imaging import segment_image
 from .renderer import render_video
+from .rigging import build_rig
+from .settings import Settings, effective_settings
 from .store import Store
 
 MAX_UPLOAD = 20 * 1024 * 1024
@@ -31,17 +32,14 @@ MAX_XML = 64 * 1024 * 1024
 LOGGER = logging.getLogger("headbop")
 
 
-class Settings(BaseModel):
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-    mode: Literal["whole", "subject"] = "whole"
-    motion: Literal["smooth", "hard", "velocity"] = "smooth"
-    bpm: float = Field(ge=40, le=240)
-    intensity: float = Field(default=1, ge=0, le=2)
-
-
 class Selection(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     rect: list[float] = Field(min_length=4, max_length=4)
+
+
+class HeadSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    head_rect: list[float] = Field(min_length=4, max_length=4)
 
 
 def read_upload(upload: UploadFile, limit: int) -> bytes:
@@ -98,14 +96,22 @@ def normalize_audio(data: bytes, target: Path):
 
 
 def frames_for(project: dict) -> list[dict]:
-    settings = project["settings"]
+    settings = effective_settings(project["settings"])
+    if settings["engine"] == "v2":
+        return generate_motion(project["duration"], project["analysis"], settings, project.get("rig"))
     return generate_keyframes(project["duration"], project["analysis"]["beats"],
                               project["analysis"]["intensity"], settings["bpm"],
                               settings["intensity"], settings["motion"])
 
 
 def public(project: dict) -> dict:
-    return {key: value for key, value in project.items() if key != "render"}
+    result = {key: value for key, value in project.items() if key != "render"}
+    result["settings"] = effective_settings(project["settings"])
+    result["mask_url"] = project.get("foreground_url")
+    result["capabilities"] = {"reference_available": False}
+    result.setdefault("rig", {"available": False, "kind": "whole", "confidence": 0,
+                              "warning": "Projeto original; ative o motor 2.0 para preparar camadas."})
+    return result
 
 
 def create_app(data_dir: Path | None = None) -> FastAPI:
@@ -131,7 +137,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         cleaner.join(timeout=1)
         pool = None
 
-    app = FastAPI(title="Headbop AI", version="0.1.0", lifespan=lifespan,
+    app = FastAPI(title="Headbop AI", version="2.0.0", lifespan=lifespan,
                   docs_url=None, redoc_url=None)
     app.state.store = store
 
@@ -194,7 +200,19 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         project["render"] = {"status": "idle", "video_url": None, "error": None}
         (store.path(project["id"]) / "video.mp4").unlink(missing_ok=True)
 
-    def build(image_data: bytes, audio_data: bytes, settings=None, rect=None):
+    def prepare_rig(project, path, head_rect=None):
+        # Old stored projects have no anatomy/confidence metadata. Add conservative
+        # defaults only when explicitly rebuilding a rig, never on a read.
+        segmentation = {"kind": "unknown", "confidence": 0.0, "head_rect": None,
+                        **project["segmentation"]}
+        project["segmentation"] = segmentation
+        project["rig"] = build_rig(path / "image.png",
+                                   path / "foreground.png" if segmentation["available"] else None,
+                                   path, segmentation, head_rect)
+
+    def build(image_data: bytes, audio_data: bytes, settings=None, rect=None,
+              head_rect=None, restored_frames=None, restored_duration=None,
+              foreground_data=None, segmentation_info=None):
         with store.lock:
             if len(store.building) >= 2:
                 raise HTTPException(429, "Há análises em andamento. Tente novamente em instantes.")
@@ -203,14 +221,24 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             width, height = normalize_image(image_data, path / "image.png")
             normalize_audio(audio_data, path / "audio.wav")
             analysis = analyze_audio(path / "audio.wav")
-            try:
-                segmentation = segment_image(path / "image.png", path / "foreground.png", rect)
-            except ValueError:
-                if rect is not None:
-                    raise
-                segmentation = {"method": "none", "available": False, "rect": None,
-                                "warning": "Não foi possível recortar automaticamente. Selecione uma região manualmente."}
-            selected = Settings.model_validate(settings or {"bpm": analysis["bpm"]}).model_dump()
+            if foreground_data is not None:
+                mask_size = normalize_image(foreground_data, path / "foreground.png")
+                if mask_size != (width, height) or segmentation_info is None:
+                    raise ValueError("O recorte incorporado não corresponde à imagem do projeto.")
+                segmentation = {**segmentation_info, "available": True, "rect": rect,
+                                "warning": "Recorte original preservado do projeto XML."}
+            else:
+                try:
+                    segmentation = segment_image(path / "image.png", path / "foreground.png", rect)
+                except ValueError:
+                    if rect is not None:
+                        raise
+                    segmentation = {"method": "none", "available": False, "rect": None,
+                                    "kind": "unknown", "confidence": 0.0, "head_rect": None,
+                                    "warning": "Não foi possível recortar automaticamente. Selecione uma região manualmente."}
+            default_mode = "subject" if (segmentation["available"] and
+                                           segmentation.get("confidence", 0) >= 0.55) else "whole"
+            selected = Settings.model_validate(settings or {"bpm": analysis["bpm"], "mode": default_mode}).model_dump()
             if selected["mode"] == "subject" and not segmentation["available"]:
                 raise ValueError("Selecione manualmente o personagem antes de usar este modo.")
             project = {
@@ -220,7 +248,14 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 "image_url": f"/api/projects/{project_id}/image",
                 "foreground_url": f"/api/projects/{project_id}/foreground" if segmentation["available"] else None,
             }
-            project["keyframes"] = frames_for(project)
+            if selected["engine"] == "v2":
+                prepare_rig(project, path, head_rect)
+            if restored_frames is not None:
+                if restored_duration is None or abs(restored_duration - project["duration"]) > 1 / 22050 + 1e-6:
+                    raise ValueError("A duração da timeline XML não corresponde ao áudio incorporado.")
+                project["keyframes"] = restored_frames
+            else:
+                project["keyframes"] = frames_for(project)
             reset_render(project)
             with store.lock:
                 store.write(project)
@@ -256,9 +291,13 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         with store.lock:
             ensure_idle(project_id)
             project = store.read(project_id)
-            if settings.mode == "subject" and not project["segmentation"]["available"]:
+            selected = Settings.model_validate({**effective_settings(project["settings"]),
+                                                **settings.model_dump(exclude_unset=True)}).model_dump()
+            if selected["mode"] == "subject" and not project["segmentation"]["available"]:
                 raise ValueError("Selecione uma cabeça ou personagem primeiro.")
-            project["settings"] = settings.model_dump()
+            project["settings"] = selected
+            if selected["engine"] == "v2" and "rig" not in project:
+                prepare_rig(project, store.path(project_id))
             project["keyframes"] = frames_for(project)
             reset_render(project)
             store.write(project)
@@ -272,6 +311,26 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             path = store.path(project_id)
             project["segmentation"] = segment_image(path / "image.png", path / "foreground.png", selection.rect)
             project["foreground_url"] = f"/api/projects/{project_id}/foreground"
+            prepare_rig(project, path)
+            project["keyframes"] = frames_for(project)
+            reset_render(project)
+            store.write(project)
+            return public(project)
+
+    @app.post("/api/projects/{project_id}/rig")
+    def adjust_rig(project_id: str, selection: HeadSelection):
+        with store.lock:
+            ensure_idle(project_id)
+            project = store.read(project_id)
+            if effective_settings(project["settings"])["engine"] != "v2":
+                raise ValueError("Ative o motor 2.0 para ajustar cabeça e pivôs.")
+            path = store.path(project_id)
+            if not project["segmentation"]["available"]:
+                project["segmentation"] = segment_image(path / "image.png", path / "foreground.png",
+                                                          selection.head_rect)
+                project["foreground_url"] = f"/api/projects/{project_id}/foreground"
+            prepare_rig(project, path, selection.head_rect)
+            project["keyframes"] = frames_for(project)
             reset_render(project)
             store.write(project)
             return public(project)
@@ -286,7 +345,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             path = store.path(project_id)
             render_video(path / "image.png", path / "foreground.png" if project["segmentation"]["available"] else None,
                          path / "audio.wav", path / "video.mp4", project["keyframes"],
-                         project["duration"], project["settings"]["mode"])
+                         project["duration"], project["settings"]["mode"],
+                         settings=effective_settings(project["settings"]), rig=project.get("rig"))
             project["render"] = {"status": "ready", "video_url": f"/api/projects/{project_id}/video", "error": None}
         except Exception:
             LOGGER.exception("Video rendering failed for project %s", project_id)
@@ -350,13 +410,24 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         with store.lock:
             project = store.read(project_id)
             path = store.path(project_id)
-            data = export_project(public(project), (path / "image.png").read_bytes(), (path / "audio.wav").read_bytes())
+            portable = public(project)
+            if portable["settings"]["engine"] == "legacy":
+                portable["settings"] = {key: portable["settings"][key]
+                                        for key in ("mode", "motion", "bpm", "intensity")}
+            foreground_data = (path / "foreground.png").read_bytes() if project["segmentation"]["available"] else None
+            data = export_project(portable, (path / "image.png").read_bytes(), (path / "audio.wav").read_bytes(),
+                                  foreground_bytes=foreground_data)
         return Response(data, media_type="application/xml", headers={"Content-Disposition": 'attachment; filename="headbop.xml"'})
 
     @app.post("/api/import", status_code=201)
     def import_xml(file: UploadFile):
         parsed = import_project(read_upload(file, MAX_XML - 65536))
-        return build(parsed["image"], parsed["audio"], parsed["settings"], parsed.get("rect"))
+        selected = parsed["settings"]
+        if parsed["schema_version"] == 1:
+            selected = {**selected, "engine": "legacy"}
+        return build(parsed["image"], parsed["audio"], selected, parsed.get("rect"),
+                     parsed.get("head_rect"), parsed["keyframes"], parsed["duration"],
+                     parsed.get("foreground"), parsed.get("segmentation_info"))
 
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
     app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="web")

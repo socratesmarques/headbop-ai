@@ -1,5 +1,8 @@
 # Internal integration contract
 
+Historical v1 contract. For the current v2 extensions and compatibility rules, see
+[ENGINE_V2_PLAN.md](ENGINE_V2_PLAN.md) and [ARCHITECTURE.md](ARCHITECTURE.md).
+
 Python package `headbop`. UI is vanilla HTML/CSS/JS served at `/`, Portuguese copy.
 No services besides FastAPI and FFmpeg. API errors JSON `{detail: string}`.
 

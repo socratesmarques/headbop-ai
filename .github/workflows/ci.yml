@@ -4,27 +4,50 @@ permissions:
   contents: read
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, Node 24
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6, Node 24
         with:
           python-version: '3.12'
           cache: pip
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: pip install -r requirements.lock && pip install --no-deps -e .
       - run: pip check && ruff check . && pytest -q
-      - run: python -m playwright install --with-deps chromium
-      - run: python scripts/browser_smoke.py
-      - uses: actions/upload-artifact@v4
+      # The runner's unbranded Chromium lacks H.264/AAC. Chrome is preinstalled
+      # on ubuntu-24.04 and exercises the real exported MP4 including audio.
+      - run: /usr/bin/google-chrome --version
+      - name: Browser workflow
+        env:
+          HEADBOP_BROWSER_EXECUTABLE: /usr/bin/google-chrome
+        run: |
+          set -o pipefail
+          mkdir -p test-results
+          python scripts/browser_smoke.py 2>&1 | tee test-results/browser-command.log
+      - name: Browser failure summary
+        if: failure()
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          log = Path('test-results/browser-command.log')
+          if log.exists():
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+                  summary.write('### Browser diagnostic\n\n```text\n')
+                  summary.write('\n'.join(log.read_text(errors='replace').splitlines()[-80:]))
+                  summary.write('\n```\n')
+          PY
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6, Node 24
         if: failure()
         with:
           name: browser-failure
           path: test-results/
   container:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, Node 24
       - run: docker build -t headbop-ai .
       - run: |
           docker run -d --name headbop -p 127.0.0.1:8000:8000 headbop-ai

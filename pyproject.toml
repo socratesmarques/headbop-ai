@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "headbop-ai"
-version = "0.1.0"
+version = "2.0.0"
 description = "Local music-driven image animation with a faithful MP4 preview"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
