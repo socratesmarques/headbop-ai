@@ -70,10 +70,13 @@ def test_complete_upload_render_export_import_delete(client, media):
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         result = client.get(prefix + "/render").json()
+        assert isinstance(result["progress"], int)
+        assert 0 <= result["progress"] <= 100
         if result["status"] in {"ready", "error"}:
             break
         time.sleep(0.05)
     assert result["status"] == "ready", result
+    assert result["progress"] == 100
     preview = client.get(result["video_url"])
     download = client.get(result["video_url"] + "?download=true")
     assert preview.content == download.content
