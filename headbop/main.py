@@ -118,6 +118,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     store = Store(data_dir or Path(os.getenv("HEADBOP_DATA_DIR", "/tmp/headbop-ai")))
     pool = None
     stop = threading.Event()
+    # Progress is transient and scoped to the current single-worker server.
+    render_progress: dict[str, int] = {}
 
     def cleanup_loop():
         while not stop.wait(300):
@@ -197,6 +199,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             raise HTTPException(409, "Aguarde a renderização atual terminar.")
 
     def reset_render(project):
+        render_progress.pop(project["id"], None)
         project["render"] = {"status": "idle", "video_url": None, "error": None}
         (store.path(project["id"]) / "video.mp4").unlink(missing_ok=True)
 
@@ -335,6 +338,11 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             store.write(project)
             return public(project)
 
+    def publish_progress(project_id: str, completed: int, total: int) -> None:
+        # Avoid writing project.json for every rendered frame.
+        with store.lock:
+            render_progress[project_id] = min(95, 5 + round(90 * completed / max(1, total)))
+
     def render_job(project_id):
         project = None
         try:
@@ -346,7 +354,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             render_video(path / "image.png", path / "foreground.png" if project["segmentation"]["available"] else None,
                          path / "audio.wav", path / "video.mp4", project["keyframes"],
                          project["duration"], project["settings"]["mode"],
-                         settings=effective_settings(project["settings"]), rig=project.get("rig"))
+                         settings=effective_settings(project["settings"]), rig=project.get("rig"),
+                         progress_callback=lambda done, total: publish_progress(project_id, done, total))
             project["render"] = {"status": "ready", "video_url": f"/api/projects/{project_id}/video", "error": None}
         except Exception:
             LOGGER.exception("Video rendering failed for project %s", project_id)
@@ -359,6 +368,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                     if project is not None:
                         store.write(project)
                 finally:
+                    render_progress.pop(project_id, None)
                     store.active.discard(project_id)
 
     @app.post("/api/projects/{project_id}/render", status_code=202)
@@ -372,6 +382,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             if len(store.active) >= 2:
                 raise HTTPException(429, "Fila de renderização cheia. Tente novamente em instantes.")
             project["render"] = {"status": "queued", "video_url": None, "error": None}
+            render_progress[project_id] = 0
             store.write(project)
             store.active.add(project_id)
             pool.submit(render_job, project_id)
@@ -384,7 +395,9 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             if project["render"]["status"] in {"queued", "rendering"} and project_id not in store.active:
                 reset_render(project)
                 store.write(project)
-            return project["render"]
+            result = dict(project["render"])
+            result["progress"] = 100 if result["status"] == "ready" else render_progress.get(project_id, 0)
+            return result
 
     @app.get("/api/projects/{project_id}/video")
     def video(project_id: str, download: bool = False):
