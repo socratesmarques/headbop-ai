@@ -55,3 +55,19 @@ select:disabled{cursor:not-allowed;color:var(--muted)}
 @keyframes loading-slide{0%{transform:translateX(-110%)}100%{transform:translateX(290%)}}
 @media(max-width:720px){.header-right{gap:8px}.language-select{max-width:96px;min-height:38px;font-size:10px;padding:4px}}
 @media(prefers-reduced-motion:reduce){.render-progress-track.indeterminate #render-progress-fill{width:100%;animation:none}}
+
+/* Keep all header actions visible at narrow phone widths. */
+@media(max-width:720px){
+  .site-header{padding:16px 14px;gap:6px}
+  .brand{font-size:20px;gap:6px}
+  .header-right{gap:6px;flex-shrink:0}
+  .header-right .button{padding:7px 8px;gap:5px;font-size:9px}
+  .language-select{max-width:85px;padding:4px;font-size:10px}
+}
+@media(max-width:380px){
+  .brand{font-size:18px;gap:4px}
+  .brand-symbol{width:27px}
+  .header-right .button{font-size:0;min-width:36px;padding:5px}
+  .header-right .button span{font-size:15px}
+  .language-select{max-width:80px}
+}
