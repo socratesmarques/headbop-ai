@@ -97,8 +97,10 @@ mídia e sua saída no resumo do job, além do artefato, para tornar uma próxim
 falha diagnosticável. Isso não é uma alegação de causa resolvida.
 
 A imagem Playwright `v1.64.1-noble` não pôde ser baixada: uma camada foi recusada
-pelo registro/proxy. O navegador empacotado usado em CI não foi reproduzido
-localmente; a validação local usou explicitamente `/usr/bin/chromium`.
+pelo registro/proxy. A validação local usou `/usr/bin/chromium`. O smoke pode
+selecionar o navegador por `HEADBOP_BROWSER_EXECUTABLE`; sem essa variável, prefere
+Chromium do sistema quando existe. A simples instalação do Chromium Playwright
+na CI não mudava essa escolha.
 
 O push de `02d5086` iniciou o run
 [`42334023606`](https://github.com/socratesmarques/headbop-ai/actions/runs/42334023606).
@@ -107,6 +109,19 @@ O job `container` passou em 1 min 6 s. Dependências, lint e pytest passaram;
 O smoke passou a emitir nas anotações apenas estados numéricos e suporte a codecs,
 sem mensagens livres, caminhos ou conteúdo da página. Isso permite investigar a
 próxima tentativa sem publicar logs brutos nem inventar a causa.
+
+O run de diagnóstico
+[`42334433553`](https://github.com/socratesmarques/headbop-ai/actions/runs/42334433553)
+confirmou a causa na branch: `browser=system`, erro de mídia 4, `ready-state=0`,
+`network-state=3` e H.264/AAC declarados `unsupported` por `canPlayType`. O smoke
+parou esperando o MP4 ficar reproduzível. O Chromium sem codecs do runner difere
+do Chromium desta máquina; não era uma falha de codificação FFmpeg confirmada.
+
+A CI passa a selecionar explicitamente `/usr/bin/google-chrome`, disponível no
+[runner oficial Ubuntu 24.04](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md).
+O teste continua exigindo reprodução do MP4 com áudio, sem trocar formato,
+silenciar a verificação ou ignorar o teste. A instalação de outro Chromium foi
+removida do workflow por não ser usada. A execução da correção está pendente.
 
 ### Render reproduzível e desempenho
 
