@@ -535,6 +535,6 @@ const previewVideo = $("preview-video");
 for (const event of ["timeupdate", "seeked", "loadedmetadata", "pause", "ended"]) previewVideo.addEventListener(event, updatePlayhead);
 previewVideo.addEventListener("play", () => { cancelAnimationFrame(playbackFrame); animatePlayhead(); });
 previewVideo.addEventListener("error", () => {
-  if (previewVideo.getAttribute("src")) notice("O navegador não conseguiu reproduire le vídeo. Baixe o MP4 para abri-lo em um player compatível.".replace("reproduire le", "reproduzir o"), true);
+  if (previewVideo.getAttribute("src")) notice("O navegador não conseguiu reproduzir o vídeo. Baixe o MP4 para abri-lo em um player compatível.", true);
 });
 refreshControls(); drawBeats();
