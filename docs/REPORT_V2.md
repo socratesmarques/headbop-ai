@@ -63,7 +63,9 @@ python scripts/render_comparison.py --output test-results/v2-final-comparison \
   720×1280 a 30 fps com áudio, download idêntico ao preview, XML v1/v2 e exclusão.
   Nenhum erro JavaScript/CSP foi observado. Não equivale a Safari/iPhone físico.
 - Docker construiu `headbop-ai:v2`, instalou o pacote 2.0.0 e executou a suíte como
-  UID 10001. O serviço pelo CMD real respondeu HTTP 200 em `/api/health`, `/` e
+  UID 10001: **279 passaram em 36,07 s** na imagem final, incluindo os casos de
+  fallback/atualização antiga. A API local passou novamente nos 23 testes após
+  essa correção. O serviço pelo CMD real respondeu HTTP 200 em `/api/health`, `/` e
   `/static/app.js`; saúde reportou FFmpeg disponível. O build usou o segredo
   BuildKit `proxy_ca` para confiar no proxy, sem desabilitar TLS.
 
@@ -98,7 +100,13 @@ A imagem Playwright `v1.64.1-noble` não pôde ser baixada: uma camada foi recus
 pelo registro/proxy. O navegador empacotado usado em CI não foi reproduzido
 localmente; a validação local usou explicitamente `/usr/bin/chromium`.
 
-O resultado remoto desta branch e o estado do PR serão registrados após o envio.
+O push de `02d5086` iniciou o run
+[`42334023606`](https://github.com/socratesmarques/headbop-ai/actions/runs/42334023606).
+O job `container` passou em 1 min 6 s. Dependências, lint e pytest passaram;
+`Browser workflow` falhou. O resumo do job também ficou indisponível sem login.
+O smoke passou a emitir nas anotações apenas estados numéricos e suporte a codecs,
+sem mensagens livres, caminhos ou conteúdo da página. Isso permite investigar a
+próxima tentativa sem publicar logs brutos nem inventar a causa.
 
 ### Render reproduzível e desempenho
 
@@ -139,6 +147,16 @@ Veja [LIMITATIONS.md](LIMITATIONS.md) para os limites completos e
 
 ## Branch e Pull Request
 
-Branch de trabalho: `feat/headbop-2-engine`, baseada em `a13bb33`.
-Entrega remota pendente de confirmação após o push e a tentativa de abrir PR.
-Nenhuma alteração direta à `main` foi solicitada ou executada.
+Branch publicada: [`feat/headbop-2-engine`](https://github.com/socratesmarques/headbop-ai/tree/feat/headbop-2-engine),
+baseada em `a13bb33`. Commits iniciais: `0b02b93` (motor/UI/testes) e `02d5086`
+(documentação/diagnósticos CI). Nenhuma alteração direta à `main` foi executada.
+
+A tentativa real de `gh pr create --base main --head feat/headbop-2-engine`
+falhou com `Post "https://api.github.com/graphql": Forbidden`. **O PR ainda não
+foi criado.** É necessário permitir `api.github.com` na política de rede do
+ambiente e repetir a criação. O texto foi preparado em `/tmp/headbop-v2-pr.md`;
+o relatório também serve como descrição de revisão.
+
+Alternativa manual: [abrir PR da branch](https://github.com/socratesmarques/headbop-ai/compare/main...feat/headbop-2-engine?expand=1).
+Esse link abre a comparação, não representa um PR existente. O ambiente não foi
+republicado para tentar contornar o bloqueio.

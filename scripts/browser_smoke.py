@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 import urllib.parse
 import urllib.request
 from xml.etree import ElementTree as ET
@@ -29,6 +30,30 @@ import soundfile as sf
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "test-results"
+
+
+def public_failure_summary(error, diagnostic, bundled):
+    """Only fixed labels, whitelisted enums and bounded numbers may be public.
+
+    Never include exception messages, URLs, browser logs, paths or page content.
+    """
+    video = diagnostic.get("video") or {}
+    def number(value, maximum):
+        return str(value) if type(value) is int and 0 <= value <= maximum else "unknown"
+    def codec(value):
+        return {"": "unsupported", "maybe": "maybe", "probably": "probably"}.get(value, "unknown")
+    kind = type(error).__name__
+    if kind not in {"TimeoutError", "AssertionError", "Error", "CalledProcessError"}:
+        kind = "Exception"
+    lines = [frame.lineno for frame in traceback.extract_tb(error.__traceback__)
+             if Path(frame.filename).resolve() == Path(__file__).resolve()]
+    return (f"Browser smoke: exception={kind}; script-line={number(lines[-1] if lines else None, 10000)}; "
+            f"browser={'bundled' if bundled else 'system'}; "
+            f"media-error={number((video.get('error') or {}).get('code'), 4)}; "
+            f"ready-state={number(video.get('readyState'), 4)}; "
+            f"network-state={number(video.get('networkState'), 3)}; "
+            f"H264={codec(video.get('h264'))}; AAC={codec(video.get('aac'))}; "
+            f"H264-AAC={codec(video.get('h264aac'))}")
 
 
 def media_files(directory: Path) -> tuple[Path, Path]:
@@ -359,15 +384,20 @@ def main():
                             "download, XML v2 frame/rig roundtrip, legacy XML v1 import/render/export, mobile "
                             "layout/touch crop/head/render/delete; no JS/CSP errors"
                         )
-                    except Exception:
+                    except Exception as error:
                         diagnostic = page.evaluate("""() => {
                             const video = document.getElementById('preview-video');
                             return {notice: document.getElementById('notice')?.textContent,
                               video: video && {error: video.error && {code:video.error.code, message:video.error.message},
                                 readyState:video.readyState, networkState:video.networkState,
                                 duration:video.duration, currentTime:video.currentTime,
+                                h264:video.canPlayType('video/mp4; codecs="avc1.42E01E"'),
+                                aac:video.canPlayType('audio/mp4; codecs="mp4a.40.2"'),
                                 h264aac:video.canPlayType('video/mp4; codecs="avc1.42E01E, mp4a.40.2"')}};
                         }""")
+                        if os.getenv("GITHUB_ACTIONS") == "true":
+                            print("::error title=Browser smoke status::" +
+                                  public_failure_summary(error, diagnostic, executable is None), flush=True)
                         print("Browser failure diagnostic:", json.dumps(diagnostic), "JS/CSP:", errors, flush=True)
                         page.screenshot(path=str(RESULTS / "failure.png"), full_page=True)
                         if mobile and mobile.pages:
