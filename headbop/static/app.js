@@ -85,10 +85,30 @@ function refreshControls() {
   }
 }
 
+function updateProgress(percent = null) {
+  const track = $("render-progress-track");
+  const fill = $("render-progress-fill");
+  const detail = $("render-progress-detail");
+  const known = Number.isFinite(percent);
+  track.classList.toggle("indeterminate", !known);
+  track.setAttribute("aria-valuetext", known ? `${Math.max(0, Math.min(100, Math.round(percent)))}%` : (window.headbopI18n?.t("Processando…") || "Processando…"));
+  if (known) {
+    const value = Math.max(0, Math.min(100, Math.round(percent)));
+    track.setAttribute("aria-valuenow", String(value));
+    fill.style.width = `${value}%`;
+    detail.textContent = `${value}%`;
+  } else {
+    track.removeAttribute("aria-valuenow");
+    fill.style.width = "";
+    detail.textContent = window.headbopI18n?.t("Processando…") || "Processando…";
+  }
+}
+
 function setBusy(value, label = "Preparando seu movimento…") {
   state.busy = value;
   $("render-overlay").hidden = !value;
-  $("render-label").textContent = label;
+  $("render-label").textContent = window.headbopI18n?.t(label) || label;
+  if (value) updateProgress();
   refreshControls();
 }
 
@@ -385,6 +405,9 @@ async function renderProject() {
     const deadline = Date.now() + 300000;
     while (token === renderToken) {
       const result = await request(endpoint);
+      if (result.status === "queued") $("render-label").textContent = window.headbopI18n?.t("Na fila de renderização…") || "Na fila de renderização…";
+      if (result.status === "rendering") $("render-label").textContent = window.headbopI18n?.t("Renderizando cada batida…") || "Renderizando cada batida…";
+      if (Number.isFinite(result.progress)) updateProgress(result.progress);
       if (result.status === "error") throw new Error(result.error || "A renderização falhou. Tente novamente.");
       if (result.status === "ready") {
         state.videoURL = `${result.video_url || `/api/projects/${state.project.id}/video`}?v=${Date.now()}`;
@@ -538,3 +561,10 @@ previewVideo.addEventListener("error", () => {
   if (previewVideo.getAttribute("src")) notice("O navegador não conseguiu reproduzir o vídeo. Baixe o MP4 para abri-lo em um player compatível.", true);
 });
 refreshControls(); drawBeats();
+
+/* Language persists between visits; change labels without resetting project state. */
+const languagePicker = $("language-select");
+if (window.headbopI18n && languagePicker) {
+  languagePicker.value = window.headbopI18n.language;
+  languagePicker.addEventListener("change", () => window.headbopI18n.setLanguage(languagePicker.value));
+}
