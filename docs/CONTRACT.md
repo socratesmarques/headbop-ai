@@ -3,6 +3,15 @@
 Historical v1 contract. For the current v2 extensions and compatibility rules, see
 [ENGINE_V2_PLAN.md](ENGINE_V2_PLAN.md) and [ARCHITECTURE.md](ARCHITECTURE.md).
 
+Current security additions supersede the historical unauthenticated examples:
+individual login at `POST /api/auth/login`, session/CSRF at `GET /api/auth/session`,
+logout at `POST /api/auth/logout`, and owned history at `GET /api/projects`.
+Every project/media route requires the session cookie; writes also require the
+configured `Origin` and `X-CSRF-Token`. Errors use `{code, params, detail?}`; known
+media validation details are translated by the client. Render POST/GET return
+`progress` and `timeout_seconds`, a finite budget including the bounded queue.
+XML v1 and v2 are both accepted; ownership is always assigned by the server.
+
 Python package `headbop`. UI is vanilla HTML/CSS/JS served at `/`, Portuguese copy.
 No services besides FastAPI and FFmpeg. API errors JSON `{detail: string}`.
 

@@ -12,6 +12,7 @@
   <meta name="twitter:card" content="summary">
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/i18n.js" defer></script>
+  <script src="/static/auth.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body>
@@ -21,7 +22,28 @@
     <div class="header-right"><span class="local-badge"><span class="status-dot"></span>Processamento no servidor</span><label class="sr-only" for="language-select">Idioma da interface</label><select id="language-select" class="language-select" aria-label="Idioma da interface"><option value="pt-BR">Português</option><option value="en">English</option><option value="es">Español</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="it">Italiano</option><option value="zh-CN">简体中文</option><option value="hi">हिन्दी</option></select><button id="import-button" class="button button-quiet" type="button"><span aria-hidden="true">↗</span> Abrir projeto</button><input id="import-file" type="file" accept=".xml,application/xml,text/xml" hidden></div>
   </header>
 
-  <main id="studio">
+  <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title">
+    <h1 id="auth-title" data-auth-text="auth.title">Entrar no Headbop AI</h1>
+    <form id="login-form">
+      <label for="login-username" data-auth-text="auth.username">Usuário</label>
+      <input id="login-username" name="username" autocomplete="username" required maxlength="64" autocapitalize="none" spellcheck="false">
+      <label for="login-password" data-auth-text="auth.password">Senha</label>
+      <input id="login-password" name="password" type="password" autocomplete="current-password" required maxlength="128">
+      <button id="login-button" class="button button-primary" type="submit" data-auth-text="auth.signIn">Entrar</button>
+    </form>
+    <p class="small-note" data-auth-text="auth.accountHelp">Solicite sua conta ao administrador.</p>
+    <p id="auth-notice" class="auth-notice" role="status" aria-live="polite" hidden></p>
+  </section>
+  <section id="account-panel" class="account-panel" hidden>
+    <div class="account-heading"><p id="account-user"></p><button id="logout-button" class="button button-quiet" type="button" data-auth-text="auth.signOut">Sair</button></div>
+    <form id="project-history-form" class="project-history-form">
+      <label for="project-history" data-auth-text="auth.projects">Meus projetos</label>
+      <select id="project-history" disabled></select>
+      <button id="open-project-button" class="button button-quiet" type="submit" disabled data-auth-text="auth.openProject">Abrir projeto</button>
+    </form>
+    <p id="account-notice" class="auth-notice" role="status" aria-live="polite" hidden></p>
+  </section>
+  <main id="studio" hidden>
     <section class="intro" aria-labelledby="page-title">
       <div><p class="eyebrow"><span></span> IMAGEM + MÚSICA + MOVIMENTO</p><h1 id="page-title">Sua imagem.<br> Um novo <em>ritmo.</em></h1><p class="intro-copy">Encontre a batida. Ajuste o movimento. Dê play.</p></div>
       <div class="intro-aside"><span class="studio-label">HEADBOP STUDIO</span><span class="edition">01 / CRIE NO SEU TEMPO</span><div class="mini-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>

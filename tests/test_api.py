@@ -29,8 +29,18 @@ def media():
 
 
 @pytest.fixture
-def client(tmp_path):
-    with TestClient(create_app(tmp_path / "data")) as test_client:
+def client(tmp_path, monkeypatch):
+    monkeypatch.setenv("HEADBOP_ENV", "development")
+    monkeypatch.delenv("HEADBOP_PUBLIC_ORIGIN", raising=False)
+    app = create_app(tmp_path / "data")
+    app.state.auth.create_user("alice", "correct-horse-battery-staple")
+    with TestClient(app) as test_client:
+        test_client.headers["Origin"] = "http://testserver"
+        response = test_client.post("/api/auth/login", json={
+            "username": "alice", "password": "correct-horse-battery-staple",
+        })
+        assert response.status_code == 200, response.text
+        test_client.headers["X-CSRF-Token"] = response.json()["csrf"]
         yield test_client
 
 
@@ -74,7 +84,7 @@ def test_complete_upload_render_export_import_delete(client, media):
         assert 0 <= result["progress"] <= 100
         if result["status"] in {"ready", "error"}:
             break
-        time.sleep(0.05)
+        time.sleep(0.25)
     assert result["status"] == "ready", result
     assert result["progress"] == 100
     preview = client.get(result["video_url"])
@@ -100,7 +110,7 @@ def test_bad_media_does_not_leave_project(client, media):
         "image": ("bad.png", b"invalid"), "audio": ("beat.wav", media[1]),
     })
     assert result.status_code == 422
-    assert list(client.app.state.store.root.iterdir()) == []
+    assert not [path for path in client.app.state.store.root.iterdir() if path.is_dir()]
 
 
 def test_invalid_settings_selection_and_xml(client, media):
@@ -141,9 +151,9 @@ def test_failed_automatic_crop_still_allows_whole_image(client, media, monkeypat
 
 
 def test_render_failure_releases_project(client, media, monkeypatch):
-    def fail(*args):
+    def fail(*args, **kwargs):
         raise RuntimeError("Test encoding failure")
-    monkeypatch.setattr("headbop.main.render_video", fail)
+    monkeypatch.setattr("headbop.main.run_render_job", fail)
     project = upload(client, media)
     prefix = f'/api/projects/{project["id"]}'
     client.post(prefix + "/render")
@@ -238,7 +248,10 @@ def test_v2_output_controls_manual_rig_and_export(client, media):
     {"engine": "legacy", "motion": "auto"},
 ])
 def test_v2_rejects_unsupported_options(client, option):
-    response = client.put("/api/projects/" + "a" * 32 + "/settings", json={"bpm": 120, **option})
+    owner_id = client.get("/api/auth/session").json()["user"]["id"]
+    project_id, _ = client.app.state.store.create(owner_id=owner_id)
+    client.app.state.store.building.discard(project_id)
+    response = client.put(f"/api/projects/{project_id}/settings", json={"bpm": 120, **option})
     assert response.status_code == 422
 
 
@@ -290,7 +303,7 @@ def test_v2_xml_preserves_uniform_background_mask_and_render(client, media):
             status = client.get(url + "/render").json()
             if status["status"] in {"ready", "error"}:
                 break
-            time.sleep(0.05)
+            time.sleep(0.25)
         assert status["status"] == "ready", status
         videos.append(client.get(url + "/video").content)
     assert videos[0] == videos[1]

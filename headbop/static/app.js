@@ -10,28 +10,63 @@ let renderToken = 0;
 let imageToken = 0;
 let playbackFrame = 0;
 
+const i18n = window.headbopI18n;
+const text = (id, key, params = {}) => i18n.bindText($(id), key, params);
+function messageError(key, params = {}) {
+  const error = new Error(i18n.t(key, params));
+  error.messageKey = key; error.messageParams = params;
+  return error;
+}
 function notice(message, error = false) {
-  $("notice").textContent = message;
-  $("notice").classList.toggle("error", error);
-  $("notice").hidden = !message;
+  const node = $("notice");
+  if (!message) { i18n.unbind(node); node.textContent = ""; }
+  else if (typeof message === "object") i18n.bindText(node, message.key, message.params);
+  else text("notice", i18n.has(message) ? message : "error.unknown");
+  node.classList.toggle("error", error);
+  node.hidden = !message;
 }
 
 async function request(url, options = {}) {
-  const response = await fetch(url, options);
-  if (!response.ok) {
-    let message = `Não foi possível concluir a operação (${response.status}).`;
-    try {
-      const body = await response.json();
-      if (typeof body.detail === "string") message = body.detail;
-      else if (Array.isArray(body.detail)) message = body.detail.map((item) => item.msg).join("; ");
-    } catch (_) { /* A proxy may return a non-JSON error. */ }
-    throw new Error(message);
+  const { timeout = 30000, deadline = Infinity, responseType = "json", ...fetchOptions } = options;
+  const remaining = Math.min(timeout, deadline - Date.now());
+  if (remaining <= 0) throw messageError("error.request_timeout");
+  const controller = new AbortController();
+  const headers = new Headers(fetchOptions.headers);
+  if (!["GET", "HEAD", "OPTIONS"].includes((fetchOptions.method || "GET").toUpperCase()) && window.headbopAuth?.csrf) {
+    headers.set("X-CSRF-Token", window.headbopAuth.csrf);
   }
-  return response.status === 204 ? null : response.json();
+  let timer;
+  const expired = new Promise((_, reject) => {
+    timer = setTimeout(() => { controller.abort(); reject(messageError("error.request_timeout")); }, remaining);
+  });
+  try {
+    // The same deadline covers headers AND consumption of a stalled response body.
+    return await Promise.race([expired, (async () => {
+      const response = await fetch(url, { ...fetchOptions, headers, signal: controller.signal });
+      if (response.status === 401) window.headbopAuth?.expired();
+      if (!response.ok) {
+        let body = {};
+        try { body = await response.json(); } catch (_) { /* A proxy may return HTML. */ }
+        const message = i18n.errorMessage(body);
+        throw messageError(message.key, message.params);
+      }
+      if (response.status === 204) return null;
+      return responseType === "blob" ? response.blob() : response.json();
+    })()]);
+  } finally { clearTimeout(timer); }
 }
 
 function handleError(error) {
-  notice(error instanceof TypeError ? "A conexão com o servidor falhou. Verifique se ele está ativo e tente novamente." : error.message, true);
+  const key = error.messageKey || (error instanceof TypeError ? "error.network" : (i18n.has(error.message) ? error.message : "error.unknown"));
+  notice({ key, params: error.messageParams || {} }, true);
+}
+
+function renderButton(key, symbol) {
+  const button = $("render-button");
+  i18n.unbind(button);
+  const icon = document.createElement("span"); icon.setAttribute("aria-hidden", "true"); icon.textContent = symbol;
+  const label = document.createElement("span"); i18n.bindText(label, key);
+  button.replaceChildren(icon, document.createTextNode(" "), label);
 }
 
 function setLinkEnabled(element, enabled) {
@@ -57,7 +92,7 @@ function refreshControls() {
   $("apply-selection").disabled = state.busy || !state.rect || state.rect[2] < 0.02 || state.rect[3] < 0.02;
   $("preview-tools").hidden = !hasProject;
   $("timeline-seek").disabled = state.busy || !state.videoURL || state.selecting;
-  $("engine-note").textContent = legacy ? "Motor original: mantém o movimento e a saída dos projetos antigos. Selecione Headbop 2.0 para usar os novos ajustes." : "O modo Auto acompanha a energia e os ataques da música.";
+  text("engine-note", legacy ? "Motor original: mantém o movimento e a saída dos projetos antigos. Selecione Headbop 2.0 para usar os novos ajustes." : "O modo Auto acompanha a energia e os ataques da música.");
   $("output-label").textContent = `${$("fps").value} FPS`;
   setLinkEnabled($("download-project"), hasProject && !state.busy);
   setLinkEnabled($("download-video"), Boolean(state.videoURL) && !state.busy);
@@ -81,39 +116,39 @@ function refreshControls() {
   $("segmentation-info").hidden = !hasProject || state.mode !== "subject";
   if (hasProject) {
     const segmentation = state.project.segmentation;
-    $("segmentation-message").textContent = segmentation.warning || (segmentation.available ? "Recorte disponível. Você pode ajustar a seleção na imagem." : "Recorte indisponível. Selecione a região do personagem na imagem.");
+    text("segmentation-message", segmentation.warning || (segmentation.available ? "Recorte disponível. Você pode ajustar a seleção na imagem." : "Recorte indisponível. Selecione a região do personagem na imagem."));
   }
 }
 
 function updateProgress(percent = null) {
   const track = $("render-progress-track");
   const fill = $("render-progress-fill");
-  const detail = $("render-progress-detail");
   const known = Number.isFinite(percent);
   track.classList.toggle("indeterminate", !known);
-  track.setAttribute("aria-valuetext", known ? `${Math.max(0, Math.min(100, Math.round(percent)))}%` : (window.headbopI18n?.t("Processando…") || "Processando…"));
   if (known) {
-    const value = Math.max(0, Math.min(100, Math.round(percent)));
+    const value = Math.max(0, Math.min(100, Math.floor(percent)));
     track.setAttribute("aria-valuenow", String(value));
     fill.style.width = `${value}%`;
-    detail.textContent = `${value}%`;
+    i18n.bindAttribute(track, "aria-valuetext", "progress.percent", { percent: value });
+    text("render-progress-detail", "progress.percent", { percent: value });
   } else {
     track.removeAttribute("aria-valuenow");
     fill.style.width = "";
-    detail.textContent = window.headbopI18n?.t("Processando…") || "Processando…";
+    i18n.bindAttribute(track, "aria-valuetext", "Processando…");
+    text("render-progress-detail", "Processando…");
   }
 }
 
 function setBusy(value, label = "Preparando seu movimento…") {
   state.busy = value;
   $("render-overlay").hidden = !value;
-  $("render-label").textContent = window.headbopI18n?.t(label) || label;
+  text("render-label", label);
   if (value) updateProgress();
   refreshControls();
 }
 
-function previewStatus(text, kind = "") {
-  $("preview-state").textContent = text;
+function previewStatus(key, kind = "") {
+  text("preview-state", key);
   $("preview-state").className = `preview-state ${kind}`;
 }
 
@@ -126,13 +161,12 @@ function showView(view) {
   imageCanvas.hidden = !state.project || view === "video";
   const note = $("inspection-note");
   note.hidden = !["mask", "rig"].includes(view);
-  if (view === "mask") note.textContent = "Les zones transparentes restent fixes dans le fond."; // Replaced below with the studio language.
-  if (view === "mask") note.textContent = "O quadriculado mostra as áreas transparentes do recorte. Ajuste a seleção se houver partes faltando.";
+  if (view === "mask") i18n.bindText(note, "O quadriculado mostra as áreas transparentes do recorte. Ajuste a seleção se houver partes faltando.");
   if (view === "rig") {
     const rig = state.project.rig;
-    note.textContent = rig?.warning || (rig?.kind === "head-body" ? "Pivôs de corpo e cabeça. Marque a cabeça para ajustar a divisão das camadas." : "Movimento em uma camada. Marque a cabeça para tentar separar cabeça e corpo.");
+    i18n.bindText(note, rig?.warning || (rig?.kind === "head-body" ? "Pivôs de corpo e cabeça. Marque a cabeça para ajustar a divisão das camadas." : "Movimento em uma camada. Marque a cabeça para tentar separar cabeça e corpo."));
   }
-  if (!state.selecting) $("preview-caption").textContent = view === "video" ? "Este é o mesmo MP4 que você vai baixar" : { source: "Imagem de origem", mask: "Máscara do personagem", rig: "Pivôs de rotação · corpo em verde, cabeça em âmbar" }[view];
+  if (!state.selecting) text("preview-caption", view === "video" ? "Este é o mesmo MP4 que você vai baixar" : { source: "Imagem de origem", mask: "Máscara do personagem", rig: "Pivôs de rotação · corpo em verde, cabeça em âmbar" }[view]);
   drawImage();
   refreshControls();
 }
@@ -148,9 +182,9 @@ function invalidatePreview() {
   $("timeline-seek").value = 0;
   showView("source");
   previewStatus("AJUSTES PENDENTES", "dirty");
-  $("preview-caption").textContent = "Imagem de origem — gere o preview para ver o movimento";
-  $("render-hint").textContent = "Gere o preview para aplicar os ajustes e ouvir a música.";
-  $("render-button").innerHTML = '<span aria-hidden="true">▶︎</span> Gerar preview';
+  text("preview-caption", "Imagem de origem — gere o preview para ver o movimento");
+  text("render-hint", "Gere o preview para aplicar os ajustes e ouvir a música.");
+  renderButton("Gerar preview", "▶︎");
   updatePlayhead();
 }
 
@@ -215,7 +249,7 @@ function updatePlayhead() {
   const current = state.videoURL ? $("preview-video").currentTime || 0 : 0;
   $("timeline-seek").value = current;
   $("playhead-label").value = durationText(current, true);
-  $("timeline-seek").setAttribute("aria-valuetext", `${durationText(current, true)} de ${durationText(state.project?.duration || 0, true)}`);
+  i18n.bindAttribute($("timeline-seek"), "aria-valuetext", "timeline.position", { current: durationText(current, true), duration: durationText(state.project?.duration || 0, true) });
   drawBeats();
 }
 
@@ -271,7 +305,11 @@ function drawImage() {
 
 function loadImage(url) {
   return new Promise((resolve, reject) => {
-    const image = new Image(); image.onload = () => resolve(image); image.onerror = reject; image.src = url;
+    const image = new Image();
+    const timer = setTimeout(() => { image.onload = image.onerror = null; image.src = ""; reject(messageError("error.request_timeout")); }, 30000);
+    image.onload = () => { clearTimeout(timer); resolve(image); };
+    image.onerror = () => { clearTimeout(timer); reject(messageError("Não foi possível carregar a imagem. Tente abrir o projeto novamente.")); };
+    image.src = url;
   });
 }
 
@@ -290,7 +328,7 @@ async function loadMask(project) {
 
 function updateSummary() {
   const project = state.project;
-  $("beat-summary").textContent = `${project.duration.toFixed(1)} s de música · ${project.keyframes.length} keyframes`;
+  text("beat-summary", "summary.beats", { duration: project.duration.toFixed(1), count: project.keyframes.length });
 }
 
 function rangeLabels() {
@@ -332,12 +370,14 @@ async function loadProject(project) {
   } catch (_) { notice("Não foi possível carregar a imagem. Tente abrir o projeto novamente.", true); }
   await loadMask(project);
   refreshControls();
+  window.headbopAuth?.refreshProjects();
 }
 
 function chooseFile(kind, file) {
   if (!file) return;
   if (file.size > 20 * 1024 * 1024) { notice("Cada arquivo pode ter até 20 MB. Escolha um arquivo menor.", true); return; }
   state.files[kind] = file;
+  i18n.unbind($(`${kind}-name`));
   $(`${kind}-name`).textContent = file.name;
   $(`${kind}-drop`).classList.add("selected");
   notice(""); refreshControls();
@@ -358,7 +398,7 @@ $("upload-form").addEventListener("submit", async (event) => {
   const body = new FormData(); body.append("image", state.files.image); body.append("audio", state.files.audio);
   notice(""); setBusy(true, "Encontrando o ritmo da sua música…");
   let created = false;
-  try { await loadProject(await request("/api/projects", { method: "POST", body })); created = true; }
+  try { await loadProject(await request("/api/projects", { method: "POST", body, timeout: 120000 })); created = true; }
   catch (error) { handleError(error); }
   finally { setBusy(false); }
   if (created) await renderProject();
@@ -385,44 +425,53 @@ $("bpm-up").addEventListener("click", () => { $("bpm").value = Math.min(240, Num
 for (const name of ["intensity", "speed", "squash"]) $(name).addEventListener("input", () => { rangeLabels(); dirty(); });
 for (const name of ["fps", "resolution", "aspect", "easing"]) $(name).addEventListener("change", dirty);
 
-async function saveSettings() {
-  const project = await request(`/api/projects/${state.project.id}/settings`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings()) });
+async function saveSettings(deadline = Infinity) {
+  const project = await request(`/api/projects/${state.project.id}/settings`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings()), deadline });
   state.project = project;
   state.dirty = false;
   updateSummary();
   return project;
 }
 
+function renderBudgetSeconds(result) {
+  const value = result?.timeout_seconds;
+  // A queued job may wait behind one complete render. The server supplies that
+  // finite budget once; status polling must never extend the overall deadline.
+  return Number.isFinite(value) && value > 0 ? Math.min(value, 3630) : 630;
+}
+
 async function renderProject() {
   if (!state.project || state.busy || state.selecting) return;
   try { settings(); } catch (error) { handleError(error); return; }
   const token = ++renderToken;
+  let deadline = Date.now() + 30000;
   notice(""); setBusy(true, "Renderizando cada batida…"); previewStatus("RENDERIZANDO");
   try {
-    if (state.dirty) await saveSettings();
+    if (state.dirty) await saveSettings(deadline);
     const endpoint = `/api/projects/${state.project.id}/render`;
-    await request(endpoint, { method: "POST" });
-    const deadline = Date.now() + 300000;
+    const accepted = await request(endpoint, { method: "POST", deadline });
+    deadline = Date.now() + renderBudgetSeconds(accepted) * 1000;
     while (token === renderToken) {
-      const result = await request(endpoint);
-      if (result.status === "queued") $("render-label").textContent = window.headbopI18n?.t("Na fila de renderização…") || "Na fila de renderização…";
-      if (result.status === "rendering") $("render-label").textContent = window.headbopI18n?.t("Renderizando cada batida…") || "Renderizando cada batida…";
-      if (Number.isFinite(result.progress)) updateProgress(result.progress);
-      if (result.status === "error") throw new Error(result.error || "A renderização falhou. Tente novamente.");
+      const result = await request(endpoint, { deadline });
+      if (result.status === "queued") text("render-label", "Na fila de renderização…");
+      if (result.status === "rendering") text("render-label", "Renderizando cada batida…");
+      if (Number.isFinite(result.progress)) updateProgress(result.status === "ready" ? 100 : Math.min(99, result.progress));
+      if (result.status === "error") { const message = i18n.errorMessage({ code: result.code || "render_failed", detail: result.error, params: result.params }); throw messageError(message.key, message.params); }
       if (result.status === "ready") {
+        updateProgress(100);
         state.videoURL = `${result.video_url || `/api/projects/${state.project.id}/video`}?v=${Date.now()}`;
         const video = $("preview-video"); video.src = state.videoURL; video.load();
         state.dirty = false; showView("video");
         previewStatus("PRONTO PARA DAR PLAY", "ready");
-        $("render-hint").textContent = "Dê play no vídeo ou baixe sua criação.";
-        $("render-button").innerHTML = '<span aria-hidden="true">↻</span> Gerar novamente';
+        text("render-hint", "Dê play no vídeo ou baixe sua criação.");
+        renderButton("Gerar novamente", "↻");
         $("download-video").href = `${state.videoURL}&download=true`;
-        $("timeline-hint").textContent = "Arraste a linha do tempo ou toque no mapa para explorar o vídeo.";
+        text("timeline-hint", "Arraste a linha do tempo ou toque no mapa para explorar o vídeo.");
         notice("Seu vídeo está pronto. Use o play da prévia para ouvir e assistir.");
         updatePlayhead(); break;
       }
-      if (Date.now() > deadline) throw new Error("A renderização está demorando mais que o esperado. Tente novamente para consultar ou gerar o vídeo.");
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (Date.now() >= deadline) throw new Error("A renderização está demorando mais que o esperado. Tente novamente para consultar ou gerar o vídeo.");
+      await new Promise((resolve) => setTimeout(resolve, Math.min(1000, Math.max(0, deadline - Date.now()))));
     }
   } catch (error) { handleError(error); previewStatus("REVISE E TENTE NOVAMENTE", "dirty"); }
   finally { setBusy(false); }
@@ -440,9 +489,9 @@ function startSelection(kind) {
   state.selectionKind = kind;
   showView("source"); state.selecting = true; state.rect = null;
   imageCanvas.classList.add("selecting"); $("selection-toolbar").hidden = false;
-  $("selection-instruction").textContent = kind === "head" ? "Arraste um retângulo ao redor da cabeça. O pivô ficará na base, perto do pescoço." : "Arraste para envolver o personagem. Inclua uma pequena margem de fundo.";
-  $("apply-selection").textContent = kind === "head" ? "Aplicar cabeça" : "Aplicar recorte";
-  $("preview-caption").textContent = kind === "head" ? "Seleção manual da cabeça" : "Seleção manual do personagem";
+  text("selection-instruction", kind === "head" ? "Arraste um retângulo ao redor da cabeça. O pivô ficará na base, perto do pescoço." : "Arraste para envolver o personagem. Inclua uma pequena margem de fundo.");
+  text("apply-selection", kind === "head" ? "Aplicar cabeça" : "Aplicar recorte");
+  text("preview-caption", kind === "head" ? "Seleção manual da cabeça" : "Seleção manual do personagem");
   drawImage(); refreshControls();
   $("stage").scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "center" });
 }
@@ -507,7 +556,7 @@ $("import-file").addEventListener("change", async (event) => {
   if (file.size > 56 * 1024 * 1024) { notice("O projeto XML deve ter até 56 MiB.", true); return; }
   const body = new FormData(); body.append("file", file);
   setBusy(true, "Abrindo seu projeto…"); notice("");
-  try { await loadProject(await request("/api/import", { method: "POST", body })); notice("Projeto Headbop importado. Gere o preview com os ajustes salvos."); }
+  try { await loadProject(await request("/api/import", { method: "POST", body, timeout: 120000 })); notice("Projeto Headbop importado. Gere o preview com os ajustes salvos."); }
   catch (error) { handleError(error); }
   finally { setBusy(false); }
 });
@@ -519,9 +568,8 @@ $("download-project").addEventListener("click", async (event) => {
   setBusy(true, "Salvando imagem, áudio e movimento…"); notice("");
   try {
     if (state.dirty) await saveSettings();
-    const response = await fetch(`/api/projects/${state.project.id}/export`);
-    if (!response.ok) throw new Error("Não foi possível exportar o projeto. Tente novamente.");
-    const url = URL.createObjectURL(await response.blob());
+    const blob = await request(`/api/projects/${state.project.id}/export`, { responseType: "blob", timeout: 120000 });
+    const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a"); anchor.href = url; anchor.download = "headbop-project.xml";
     document.body.appendChild(anchor); anchor.click(); anchor.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60000);
@@ -536,6 +584,7 @@ $("clear-project").addEventListener("click", async () => {
   setBusy(true, "Removendo arquivos desta sessão…"); notice("");
   try {
     await request(`/api/projects/${state.project.id}`, { method: "DELETE" });
+    window.headbopAuth?.refreshProjects();
     renderToken += 1; imageToken += 1;
     state.project = null; state.image = null; state.mask = null; state.files = { image: null, audio: null }; state.dirty = false;
     state.mode = "whole"; state.motion = "auto"; state.engine = "v2";
@@ -543,11 +592,11 @@ $("clear-project").addEventListener("click", async () => {
     for (const [name, value] of Object.entries(defaults)) $(name).value = value;
     $("bpm").value = 120; $("intensity").value = 1; rangeLabels();
     invalidatePreview(); cancelSelection(); $("upload-form").reset();
-    $("image-name").textContent = "Escolha uma imagem"; $("audio-name").textContent = "Escolha sua música";
+    text("image-name", "Escolha uma imagem"); text("audio-name", "Escolha sua música");
     $("image-drop").classList.remove("selected"); $("audio-drop").classList.remove("selected");
     $("stage-empty").hidden = false; $("detected-bpm").textContent = "—"; $("beat-count").textContent = "—"; $("duration-label").textContent = "—";
-    $("beat-summary").textContent = "A sua música define o movimento."; $("render-hint").textContent = "Adicione seus arquivos para gerar a animação.";
-    $("preview-caption").textContent = "Preview fiel ao MP4 exportado"; $("timeline-hint").textContent = "Depois do render, arraste a linha do tempo para explorar o vídeo.";
+    text("beat-summary", "A sua música define o movimento."); text("render-hint", "Adicione seus arquivos para gerar a animação.");
+    text("preview-caption", "Preview fiel ao MP4 exportado"); text("timeline-hint", "Depois do render, arraste a linha do tempo para explorar o vídeo.");
     previewStatus("AGUARDANDO ARQUIVOS"); drawBeats(); notice("Arquivos do projeto removidos deste servidor.");
   } catch (error) { handleError(error); }
   finally { setBusy(false); }
@@ -568,3 +617,14 @@ if (window.headbopI18n && languagePicker) {
   languagePicker.value = window.headbopI18n.language;
   languagePicker.addEventListener("change", () => window.headbopI18n.setLanguage(languagePicker.value));
 }
+
+// Restore an owned project from the account history without creating duplicate work.
+document.addEventListener("headbop:open-project", async (event) => {
+  if (state.busy || !event.detail?.id) return;
+  notice(""); setBusy(true, "Abrindo seu projeto…");
+  let loaded = false;
+  try { await loadProject(await request(`/api/projects/${encodeURIComponent(event.detail.id)}`)); loaded = true; }
+  catch (error) { handleError(error); }
+  finally { setBusy(false); }
+  if (loaded) await renderProject();
+});

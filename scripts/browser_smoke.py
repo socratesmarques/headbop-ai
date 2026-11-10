@@ -111,6 +111,14 @@ def wait_server(base_url: str, server: subprocess.Popen, logfile: Path):
     raise RuntimeError(f"Server did not start: {logfile.read_text()}")
 
 
+def login(page, username="smoke-user"):
+    expect(page.locator("#auth-panel")).to_be_visible()
+    page.locator("#login-username").fill(username)
+    page.locator("#login-password").fill("Smoke-test-password-42")
+    page.locator("#login-button").click()
+    expect(page.locator("#studio")).to_be_visible(timeout=15000)
+
+
 def no_overflow(page):
     assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), (
         "Horizontal overflow"
@@ -246,6 +254,12 @@ def main():
         base_url = f"http://127.0.0.1:{port}"
         environment = os.environ.copy()
         environment["HEADBOP_DATA_DIR"] = str(directory / "projects")
+        environment["HEADBOP_ENV"] = "development"
+        environment["HEADBOP_PUBLIC_ORIGIN"] = base_url
+        from headbop.auth import AuthStore
+        accounts = AuthStore(directory / "projects" / "security.sqlite3")
+        accounts.create_user("smoke-user", "Smoke-test-password-42")
+        accounts.create_user("second-user", "Smoke-test-password-42")
         environment["OPENBLAS_NUM_THREADS"] = "1"
         environment["OMP_NUM_THREADS"] = "1"
         logfile = RESULTS / "browser-server.log"
@@ -263,7 +277,7 @@ def main():
                     browser = playwright.chromium.launch(executable_path=executable, headless=True)
                     print(f"Browser: {executable or 'Playwright bundled headless'}, version: {browser.version}", flush=True)
                     context = browser.new_context(
-                        viewport={"width": 1440, "height": 1100}, reduced_motion="reduce", locale="pt-BR"
+                        base_url=base_url, viewport={"width": 1440, "height": 1100}, reduced_motion="reduce", locale="pt-BR"
                     )
                     page = context.new_page()
                     errors = []
@@ -271,6 +285,7 @@ def main():
                     mobile = None
                     try:
                         page.goto(base_url)
+                        login(page)
                         # Localized UI, persistence, and reversible language switching.
                         page.locator("#language-select").select_option("en")
                         expect(page.locator("#source-title")).to_contain_text("Your files")
@@ -355,12 +370,13 @@ def main():
                         assert imported["rig"]["head_rect"] == before_export["rig"]["head_rect"]
 
                         mobile = browser.new_context(
-                            viewport={"width": 390, "height": 844}, is_mobile=True,
+                            base_url=base_url, viewport={"width": 390, "height": 844}, is_mobile=True,
                             has_touch=True, device_scale_factor=3, reduced_motion="reduce", locale="pt-BR",
                         )
                         mobile_page = mobile.new_page()
                         watch_errors(mobile_page, errors)
                         mobile_page.goto(base_url)
+                        login(mobile_page)
                         no_overflow(mobile_page)
                         mobile_page.screenshot(path=str(RESULTS / "mobile-empty.png"), full_page=True)
                         import_project(mobile_page, xml_path)
@@ -388,12 +404,36 @@ def main():
                         page.screenshot(path=str(RESULTS / "desktop-legacy.png"), full_page=True)
                         page.locator("#clear-project").click()
                         expect(page.locator("#notice")).to_contain_text("Arquivos do projeto removidos")
+                        # Durable sessions restore access to only this account's history.
+                        page.reload()
+                        expect(page.locator("#studio")).to_be_visible()
+                        expect(page.locator(f'#project-history option[value="{initial["id"]}"]')).to_have_count(1)
+                        page.locator("#project-history").select_option(initial["id"])
+                        page.locator("#open-project-button").click()
+                        ready(page, generate=False)
+                        assert project_data(page)["id"] == initial["id"]
+                        # Logout/login must clear canvases, controls, media and account state.
+                        page.locator("#logout-button").click()
+                        expect(page.locator("#auth-panel")).to_be_visible()
+                        expect(page.locator("#studio")).to_be_hidden()
+                        assert page.request.get(f'/api/projects/{initial["id"]}/image').status == 401
+                        login(page, "second-user")
+                        expect(page.locator("#project-history")).to_be_disabled()
+                        expect(page.locator("#stage-empty")).to_be_visible()
+                        assert not page.locator("#preview-video").get_attribute("src")
+                        for suffix in ("", "/image", "/foreground", "/video", "/export", "/render"):
+                            assert page.request.get(f'/api/projects/{initial["id"]}{suffix}').status == 404
+                        # Revocation by the administrator is observed on the next request.
+                        accounts.revoke_user_sessions(accounts.get_user("second-user")["id"])
+                        page.evaluate("() => window.headbopAuth.refreshProjects()")
+                        expect(page.locator("#auth-panel")).to_be_visible()
+                        expect(page.locator("#studio")).to_be_hidden()
                         assert not errors, errors
                         print(
                             "PASS: auto v2 preview, energy/onsets, mask/rig views, engine and advanced settings, "
                             "manual crop/head, timeline seek, 720p/30fps vertical MP4 with audio and identical "
                             "download, XML v2 frame/rig roundtrip, legacy XML v1 import/render/export, mobile "
-                            "layout/touch crop/head/render/delete; no JS/CSP errors"
+                            "layout/touch crop/head/render/delete, session persistence, account history, logout, cross-account denial and revocation; no JS/CSP errors"
                         )
                     except Exception as error:
                         diagnostic = page.evaluate("""() => {

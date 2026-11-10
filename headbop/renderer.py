@@ -6,12 +6,15 @@ from dataclasses import dataclass
 import math
 import shutil
 import subprocess
-import tempfile
+import threading
+import time
 from pathlib import Path
 
 import cv2
 import numpy as np
 from PIL import Image
+
+from .jobs import _kill_process_tree, _process_group_options, render_timeout
 
 FPS = 24
 MAX_EDGE = 640
@@ -267,14 +270,25 @@ def render_video(
     image_path: Path, foreground_path: Path | None, audio_path: Path,
     output_path: Path, keyframes: list[dict], duration: float, mode: str,
     *, settings: dict | None = None, rig: dict | None = None,
-    progress_callback=None,
+    progress_callback=None, timeout_seconds: float | None = None,
+    isolate_process_group: bool = True,
 ) -> None:
     """Render H.264/AAC on CPU; old positional calls retain 640px/24fps behavior.
 
     V2 fits the source inside the selected canvas, uses normalized source-space
     pivots, and composes head motion relative to the body. At most 1800 frames
     are streamed to FFmpeg; no full timeline of image buffers is retained.
+    A watchdog also interrupts blocked encoder writes. Production jobs run in
+    a supervised worker so a native scene-composition hang is interruptible.
     """
+    deadline = time.monotonic() + render_timeout(timeout_seconds)
+
+    def remaining():
+        seconds = deadline - time.monotonic()
+        if seconds <= 0:
+            raise TimeoutError("O render excedeu o tempo limite.")
+        return seconds
+
     if shutil.which("ffmpeg") is None:
         raise RuntimeError("FFmpeg não está instalado no servidor.")
     if mode not in ("whole", "subject"):
@@ -282,6 +296,7 @@ def render_video(
     fps, _, _, legacy = _options(settings)
     _validate_timeline(keyframes, duration, fps, legacy)
     scene = _prepare_scene(image_path, foreground_path, mode, settings, rig)
+    remaining()
     width, height = scene.size
     output_path.parent.mkdir(parents=True, exist_ok=True)
     partial = output_path.with_name(output_path.name + ".partial.mp4")
@@ -294,29 +309,70 @@ def render_video(
         "-b:a", "128k", "-t", str(duration), "-movflags", "+faststart", str(partial),
     ]
     process = None
+    timer = None
+    published = False
+    complete = False
+    expired = threading.Event()
+
+    def expire():
+        expired.set()
+        _kill_process_tree(process, isolate_process_group)
+
     try:
-        with tempfile.TemporaryFile() as errors:
-            process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=errors)
-            assert process.stdin is not None
-            try:
-                total_frames = math.ceil(duration * fps)
-                interval = max(1, total_frames // 100)
-                for number in range(total_frames):
-                    frame = _frame_transform(keyframes, number / fps)
-                    process.stdin.write(_render_frame(scene, frame).tobytes())
-                    if progress_callback is not None and ((number + 1) % interval == 0 or number + 1 == total_frames):
-                        progress_callback(number + 1, total_frames)
-            except BrokenPipeError as error:
-                raise RuntimeError("FFmpeg interrompeu a codificação do vídeo.") from error
-            finally:
-                process.stdin.close()
-            if process.wait(timeout=120) != 0:
-                raise RuntimeError("FFmpeg não conseguiu codificar o vídeo.")
+        process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL, bufsize=0,
+                                   **_process_group_options(isolate_process_group))
+        timer = threading.Timer(remaining(), expire)
+        timer.daemon = True
+        timer.start()
+        assert process.stdin is not None
+        try:
+            total_frames = math.ceil(duration * fps)
+            interval = max(1, total_frames // 100)
+            for number in range(total_frames):
+                remaining()
+                frame = _frame_transform(keyframes, number / fps)
+                data = memoryview(_render_frame(scene, frame).tobytes())
+                while data:
+                    remaining()
+                    written = process.stdin.write(data)
+                    if not written:
+                        raise BrokenPipeError
+                    data = data[written:]
+                if progress_callback is not None and ((number + 1) % interval == 0 or number + 1 == total_frames):
+                    progress_callback(number + 1, total_frames)
+        except BrokenPipeError as error:
+            if expired.is_set() or time.monotonic() >= deadline:
+                raise TimeoutError("O render excedeu o tempo limite.") from error
+            raise RuntimeError("FFmpeg interrompeu a codificação do vídeo.") from error
+        finally:
+            # Unbuffered writes leave nothing to flush during close.
+            process.stdin.close()
+        try:
+            returncode = process.wait(timeout=remaining())
+        except subprocess.TimeoutExpired as error:
+            raise TimeoutError("O render excedeu o tempo limite.") from error
+        remaining()
+        if expired.is_set():
+            raise TimeoutError("O render excedeu o tempo limite.")
+        if returncode != 0:
+            raise RuntimeError("FFmpeg não conseguiu codificar o vídeo.")
         if not partial.is_file() or partial.stat().st_size == 0:
             raise RuntimeError("O vídeo gerado está vazio.")
         partial.replace(output_path)
+        published = True
+        remaining()
+        complete = True
     finally:
-        if process is not None and process.poll() is None:
-            process.kill()
+        if timer is not None:
+            timer.cancel()
+            if timer.ident is not None:
+                timer.join()
+        if process is not None:
+            _kill_process_tree(process, isolate_process_group)
             process.wait()
+            if process.stdin is not None:
+                process.stdin.close()
         partial.unlink(missing_ok=True)
+        if published and not complete:
+            output_path.unlink(missing_ok=True)

@@ -52,8 +52,9 @@ As instruções Windows/Kali não equivalem a testes executados nesses sistemas;
 consulte o relatório. Tela/toque móveis são exercitados em Chromium emulado;
 iPhone/Safari físico não foi validado.
 
-Projetos são temporários, sem autenticação, contas ou backup. Use localmente ou
-em rede privada confiável. O processo deve ter um worker; não há fila distribuída,
-retomada de render interrompido ou isolamento de usuários. Nunca confunda código
-CI configurado com uma execução remota aprovada: o estado observado está no
-relatório de entrega.
+Projetos são temporários e pertencem à conta que os criou. Contas são provisionadas
+pelo administrador; não há cadastro aberto, recuperação por e-mail ou backup
+automático. O processo deve ter um worker, imposto por trava no diretório de dados;
+não há fila distribuída. Renderizações interrompidas são marcadas como erro e podem
+ser solicitadas novamente. Consulte o [guia de produção](PRODUCTION.md) e o
+[registro de validação](PR3_FIXES_VALIDATION.md) para limites e verificações externas.

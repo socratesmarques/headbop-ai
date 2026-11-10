@@ -1,11 +1,25 @@
-# Restricted testing environment with one shared credential.
-# Caddy provisions and renews HTTPS for the configured public domain.
+# Accounts and authorization are enforced by the application on every API route.
+{
+  servers {
+    timeouts {
+      read_header 10s
+      read_body 30s
+      idle 2m
+    }
+  }
+}
 {$HEADBOP_DOMAIN} {
   request_body {
-    max_size 60MB
+    max_size 64MiB
   }
-  basic_auth {
-    tester {$HEADBOP_BASIC_AUTH_HASH}
+  header Strict-Transport-Security "max-age=31536000"
+  reverse_proxy app:8000 {
+    # Never pass an address supplied by an untrusted external client.
+    header_up X-Forwarded-For {remote_host}
+    header_up X-Forwarded-Proto {scheme}
+    transport http {
+      dial_timeout 5s
+      response_header_timeout 120s
+    }
   }
-  reverse_proxy app:8000
 }

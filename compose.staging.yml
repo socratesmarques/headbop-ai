@@ -1,4 +1,4 @@
-# Restricted staging only. Not a public multi-user production deployment.
+# Single-host deployment with individual accounts; see docs/PRODUCTION.md.
 services:
   app:
     build: .
@@ -6,8 +6,17 @@ services:
     init: true
     environment:
       HEADBOP_DATA_DIR: /data
+      HEADBOP_ENV: production
+      HEADBOP_PUBLIC_ORIGIN: https://${HEADBOP_DOMAIN:?Set the public domain}
       HEADBOP_TTL_HOURS: "24"
       HEADBOP_MAX_PROJECTS: "30"
+      HEADBOP_USER_MAX_PROJECTS: "10"
+      HEADBOP_MAX_STORAGE_MIB: "2048"
+      HEADBOP_USER_STORAGE_MIB: "256"
+      HEADBOP_RENDER_TIMEOUT_SECONDS: "300"
+      HEADBOP_MAX_VIDEO_MIB: "64"
+    # The backend port is private. Only Caddy may set forwarded client addresses.
+    command: ["uvicorn", "headbop.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--forwarded-allow-ips", "*"]
     volumes:
       - headbop_data:/data
     expose:
@@ -17,6 +26,9 @@ services:
     pids_limit: 128
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 20s
     read_only: true
     tmpfs:
       - /tmp:size=512m,mode=1777
@@ -32,7 +44,6 @@ services:
       - "443:443"
     environment:
       HEADBOP_DOMAIN: ${HEADBOP_DOMAIN:?Set the public domain}
-      HEADBOP_BASIC_AUTH_HASH: ${HEADBOP_BASIC_AUTH_HASH:?Set a Caddy password hash}
     volumes:
       - ./Caddyfile.staging:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
