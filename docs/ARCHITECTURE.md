@@ -44,8 +44,24 @@ regeneram os keyframes com o motor selecionado.
 Um worker Uvicorn, no máximo duas análises simultâneas e uma renderização ativa
 com outra aceita na fila. Operações de edição são recusadas durante a renderização
 para impedir mistura de configurações. A expiração não remove projetos em uso.
-O limite de disco de 512 MiB é de admissão, não uma reserva rígida contra operações
-já aceitas. O vídeo tem até 30 segundos/1800 frames; resolução alta é opcional.
+Uma trava de processo no diretório de dados impede múltiplos workers de contornar
+as reservas. Cotas de projetos e disco são verificadas por conta e globalmente,
+com reserva atômica antes da leitura de uploads e da entrada na fila. Cada conta
+tem no máximo uma análise e um render pendentes. O vídeo tem até 30 segundos/1800
+frames; resolução alta é opcional.
+
+`jobs.py` supervisiona um processo `worker.py` por render. O prazo total inclui
+preparação nativa, escrita no FFmpeg, finalização e validação com ffprobe. Timeout,
+cancelamento e falha encerram o grupo de processos, removem a saída incompleta e
+liberam a fila. O arquivo de saída tem limite de tamanho imposto ao processo.
+O progresso usa os quadros enviados e reserva a conclusão para a saída validada.
+
+`auth.py` mantém contas, hashes scrypt, sessões opacas revogáveis e limites de
+requisições em SQLite. `security.py` aplica origem, CSRF e admissão. `.owner` associa
+cada projeto à sua conta; IDs de outro usuário recebem 404 em todas as rotas.
+Projetos antigos sem dono só ficam acessíveis após adoção explícita pela CLI.
+`auth.js` apresenta login/histórico e limpa a página ao trocar de conta. `i18n.js`
+usa bindings explícitos para textos e atributos, sem MutationObserver contínuo.
 
 ## UI e API
 

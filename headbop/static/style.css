@@ -44,3 +44,46 @@ select:disabled{cursor:not-allowed;color:var(--muted)}
 @media(max-width:1000px) and (min-width:721px){.preview-tools{padding:10px 14px;gap:4px}.view-options{max-width:none;flex-basis:100%}.preview-tools>.text-button{padding-left:0}.view-options>button{padding:8px 5px}.settings-grid{gap:8px}.settings-grid select{padding-left:8px;font-size:11px}}
 @media(max-width:720px){select{font-size:16px;min-height:46px}.engine-row>label,.settings-grid>label,.select-label{font-size:11px}.engine-row{margin-top:24px}.advanced-settings>summary{font-size:12px;min-height:52px}.reference-note{font-size:10px}.motion-option{min-height:85px}.preview-tools{padding:12px 14px;gap:7px}.view-options{flex-basis:100%;max-width:none}.view-options>button{min-height:44px;font-size:11px;padding:8px}.preview-tools>.text-button{padding:6px 0;font-size:11px}.inspection-note{font-size:11px;padding:12px 14px}.timeline-seek{height:40px;min-height:40px}.timeline-labels{gap:6px}.timeline-legend{font-size:8px;gap:4px}.timeline-legend>i{margin-left:3px}}
 @media(max-width:380px){.settings-grid{grid-template-columns:1fr}}
+
+/* Loading feedback and language selection; CSS additive to preserve studio layout. */
+.language-select{max-width:135px;min-height:38px;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:11px;cursor:pointer}
+.language-select option{background:var(--panel);color:var(--text)}
+.render-progress-track{width:min(270px,85%);height:9px;min-height:9px;background:#303b24;border:1px solid #4a5b30;border-radius:999px;overflow:hidden;position:relative}
+#render-progress-fill{display:block;width:0;height:100%;background:var(--accent);border-radius:inherit;transition:width .25s ease}
+.render-progress-track.indeterminate #render-progress-fill{width:38%;animation:loading-slide 1.6s ease-in-out infinite}
+#render-progress-detail{color:var(--accent);font-size:11px;font-variant-numeric:tabular-nums}
+@keyframes loading-slide{0%{transform:translateX(-110%)}100%{transform:translateX(290%)}}
+@media(max-width:720px){.header-right{gap:8px}.language-select{max-width:96px;min-height:38px;font-size:10px;padding:4px}}
+@media(prefers-reduced-motion:reduce){.render-progress-track.indeterminate #render-progress-fill{width:100%;animation:none}}
+
+/* Keep all header actions visible at narrow phone widths. */
+@media(max-width:720px){
+  .site-header{padding:16px 14px;gap:6px}
+  .brand{font-size:20px;gap:6px}
+  .header-right{gap:6px;flex-shrink:0}
+  .header-right .button{padding:7px 8px;gap:5px;font-size:9px}
+  .language-select{max-width:85px;padding:4px;font-size:10px}
+}
+@media(max-width:380px){
+  .brand{font-size:18px;gap:4px}
+  .brand-symbol{width:27px}
+  .header-right .button{font-size:0;min-width:36px;padding:5px}
+  .header-right .button span{font-size:15px}
+  .language-select{max-width:80px}
+}
+
+.auth-panel{width:calc(100% - 32px);max-width:420px;margin:48px auto;padding:28px}
+.auth-panel h1{font-size:24px;line-height:1.3;margin-bottom:24px}
+#login-form{display:grid;gap:10px}
+#login-form label{font-size:12px;color:var(--muted)}
+#login-form input{width:100%;min-width:0;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text)}
+#login-button{margin-top:12px}
+.auth-notice{margin-top:14px;font-size:12px;color:var(--amber);overflow-wrap:anywhere}
+.account-panel{max-width:1280px;margin:22px auto 0;padding:0 34px}
+.account-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px}
+#account-user{color:var(--muted);overflow-wrap:anywhere;min-width:0}
+.project-history-form{display:flex;align-items:center;gap:12px}
+.project-history-form label{font-size:12px;flex-shrink:0}
+.project-history-form select{flex:1}
+.project-history-form button{flex-shrink:0}
+@media(max-width:600px){.account-panel{padding:0 18px}.project-history-form{flex-wrap:wrap}.project-history-form label{width:100%}.project-history-form select{flex-basis:55%}.project-history-form button{max-width:40%;padding:10px;font-size:11px}.account-heading{font-size:12px}}

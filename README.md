@@ -63,6 +63,9 @@ python3.12 -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements.lock
 python -m pip install --no-deps -e .
+export HEADBOP_ENV=development
+export HEADBOP_PUBLIC_ORIGIN=http://127.0.0.1:8000
+python -m headbop.manage users create alice
 uvicorn headbop.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
@@ -83,23 +86,29 @@ cd headbop-ai
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.lock
 .\.venv\Scripts\python.exe -m pip install --no-deps -e .
+$env:HEADBOP_ENV="development"
+$env:HEADBOP_PUBLIC_ORIGIN="http://127.0.0.1:8000"
+.\.venv\Scripts\python.exe -m headbop.manage users create alice
 .\.venv\Scripts\python.exe -m uvicorn headbop.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
 As instruções Windows são documentadas, mas esta entrega foi executada em Linux.
-Abra o endereço local informado pelo Uvicorn. Para usar no iPhone da mesma rede,
-exponha a porta apenas em uma rede privada de confiança e acesse o endereço do
-computador. Safari/iPhone físico ainda requer validação própria.
+Abra o endereço local informado pelo Uvicorn e entre com a conta criada. Para
+acesso por outros dispositivos, configure a origem HTTPS conforme o guia de
+implantação. Safari/iPhone físico ainda requer validação própria.
 
 ## Docker
 
 ```bash
 docker build -t headbop-ai .
-docker run --rm -p 127.0.0.1:8000:8000 headbop-ai
+docker run -d --name headbop -p 127.0.0.1:8000:8000 -v headbop_data:/data \
+  -e HEADBOP_DATA_DIR=/data -e HEADBOP_ENV=development \
+  -e HEADBOP_PUBLIC_ORIGIN=http://127.0.0.1:8000 headbop-ai
+docker exec -it headbop python -m headbop.manage users create alice
 ```
 
-O contêiner usa usuário sem privilégios e inclui FFmpeg. Exporte seu XML antes de
-removê-lo. Em ambiente com proxy TLS, o Dockerfile aceita um certificado confiável
+O contêiner usa usuário sem privilégios e inclui FFmpeg. O volume preserva
+contas e projetos entre reinícios; os projetos expiram conforme o TTL. Em ambiente com proxy TLS, o Dockerfile aceita um certificado confiável
 via BuildKit: `--secret id=proxy_ca,src=/caminho/ca-bundle.pem`; a verificação TLS
 permanece habilitada e o certificado não é incorporado à imagem.
 
@@ -121,6 +130,7 @@ python -m pytest -q
 ruff check .
 python -m playwright install chromium
 python scripts/browser_smoke.py
+python scripts/i18n_browser_test.py
 python scripts/render_comparison.py --help
 ```
 
@@ -140,6 +150,29 @@ estado anterior ao [merge do PR #1](https://github.com/socratesmarques/headbop-a
 Consulte os resultados atuais na
 [CI da main](https://github.com/socratesmarques/headbop-ai/actions?query=branch%3Amain).
 
+
+## Idiomas e progresso
+
+A interface permite selecionar português, inglês, espanhol, francês, alemão,
+italiano, chinês simplificado e hindi. A escolha é lembrada pelo navegador
+quando o armazenamento local está habilitado. Os catálogos completos incluem textos dinâmicos, erros, instruções e atributos
+de acessibilidade. A troca de idioma atualiza esses textos sem observar mutações
+da página nem enviar texto para tradutores externos.
+
+O carregamento de uploads e a análise inicial são **indeterminados**: não há
+porcentagem real disponível nessa etapa. Durante a geração do MP4, a API de
+status retorna `progress` (0–100) baseado em quadros processados, reservando
+os últimos 5% para a conclusão do FFmpeg. Isso **não é** uma previsão de tempo
+restante. O indicador chega a 100% somente com vídeo finalizado.
+
+## Publicação
+
+Consulte [o guia de implantação com contas individuais](docs/PRODUCTION.md) e o
+[registro de validação das correções da PR #3](docs/PR3_FIXES_VALIDATION.md).
+A aplicação exige autenticação, isola projetos por proprietário e aplica cotas
+por usuário e limites de requisições. A implantação suporta uma única instância;
+DNS/HTTPS público, carga real, backup e operação precisam ser validados no host final.
+
 ## Configuração e privacidade
 
 | Variável | Padrão |
@@ -147,10 +180,19 @@ Consulte os resultados atuais na
 | `HEADBOP_DATA_DIR` | `/tmp/headbop-ai` |
 | `HEADBOP_TTL_HOURS` | `24` |
 | `HEADBOP_MAX_PROJECTS` | `50` |
+| `HEADBOP_ENV` | `production` |
+| `HEADBOP_PUBLIC_ORIGIN` | obrigatório HTTPS em produção |
+| `HEADBOP_USER_MAX_PROJECTS` | `10` |
+| `HEADBOP_USER_STORAGE_MIB` | `256` |
+| `HEADBOP_MAX_STORAGE_MIB` | `2048` |
+| `HEADBOP_RENDER_TIMEOUT_SECONDS` | `300` |
+| `HEADBOP_MAX_VIDEO_MIB` | `64` |
 
 Veja [.env.example](.env.example). As variáveis devem ser exportadas no processo;
 `.env` não é carregado automaticamente. Use **um único worker**, porque a fila é
-local. Endpoints: `/api/health` e especificação `/openapi.json`.
+local. `/api/health` é público; `/openapi.json` exige autenticação. Crie, redefina
+ou desative contas com `python -m headbop.manage users --help`. Projetos legados
+sem proprietário requerem atribuição explícita; consulte o guia de migração.
 
 Cada mídia enviada tem limite de 20 MiB; imagens até 16 megapixels são normalizadas
 para até 1600 pixels de lado. XML tem limite de 56 MiB. Processamento e armazenamento
@@ -158,8 +200,8 @@ acontecem no servidor local, sem envio da mídia a serviços de IA. A limpeza oc
 periodicamente; também é possível excluir a sessão. O XML incorpora as mídias:
 compartilhá-lo compartilha seu conteúdo.
 
-Não há autenticação nem isolamento por usuário. Para exposição pública, adicione
-controle de acesso, HTTPS e limites de recursos. Arquivos temporários não têm
+Contas e projetos são isolados por usuário. A configuração de produção exige
+HTTPS e aplica limites de recursos e de requisições. Arquivos temporários não têm
 backup automático. Mais detalhes em [arquitetura](docs/ARCHITECTURE.md),
 [limitações](docs/LIMITATIONS.md) e [histórico do plano da evolução](docs/ENGINE_V2_PLAN.md).
 

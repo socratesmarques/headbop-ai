@@ -6,17 +6,44 @@
   <meta name="theme-color" content="#10110e">
   <meta name="description" content="Transforme música e imagem em movimento. Analise batidas, ajuste a animação e exporte seu vídeo com Headbop AI.">
   <title>Headbop AI — Imagem no ritmo</title>
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Headbop AI — Imagem no ritmo">
+  <meta property="og:description" content="Transforme imagem e música em uma animação sincronizada e exporte seu MP4.">
+  <meta name="twitter:card" content="summary">
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/i18n.js" defer></script>
+  <script src="/static/auth.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#studio">Ir para o estúdio</a>
   <header class="site-header">
     <a class="brand" href="/" aria-label="Headbop AI, início"><span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i><i></i></span>headbop<span class="brand-ai">AI</span></a>
-    <div class="header-right"><span class="local-badge"><span class="status-dot"></span>Processamento no servidor local</span><button id="import-button" class="button button-quiet" type="button"><span aria-hidden="true">↗</span> Abrir projeto</button><input id="import-file" type="file" accept=".xml,application/xml,text/xml" hidden></div>
+    <div class="header-right"><span class="local-badge"><span class="status-dot"></span>Processamento no servidor</span><label class="sr-only" for="language-select">Idioma da interface</label><select id="language-select" class="language-select" aria-label="Idioma da interface"><option value="pt-BR">Português</option><option value="en">English</option><option value="es">Español</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="it">Italiano</option><option value="zh-CN">简体中文</option><option value="hi">हिन्दी</option></select><button id="import-button" class="button button-quiet" type="button"><span aria-hidden="true">↗</span> Abrir projeto</button><input id="import-file" type="file" accept=".xml,application/xml,text/xml" hidden></div>
   </header>
 
-  <main id="studio">
+  <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title">
+    <h1 id="auth-title" data-auth-text="auth.title">Entrar no Headbop AI</h1>
+    <form id="login-form">
+      <label for="login-username" data-auth-text="auth.username">Usuário</label>
+      <input id="login-username" name="username" autocomplete="username" required maxlength="64" autocapitalize="none" spellcheck="false">
+      <label for="login-password" data-auth-text="auth.password">Senha</label>
+      <input id="login-password" name="password" type="password" autocomplete="current-password" required maxlength="128">
+      <button id="login-button" class="button button-primary" type="submit" data-auth-text="auth.signIn">Entrar</button>
+    </form>
+    <p class="small-note" data-auth-text="auth.accountHelp">Solicite sua conta ao administrador.</p>
+    <p id="auth-notice" class="auth-notice" role="status" aria-live="polite" hidden></p>
+  </section>
+  <section id="account-panel" class="account-panel" hidden>
+    <div class="account-heading"><p id="account-user"></p><button id="logout-button" class="button button-quiet" type="button" data-auth-text="auth.signOut">Sair</button></div>
+    <form id="project-history-form" class="project-history-form">
+      <label for="project-history" data-auth-text="auth.projects">Meus projetos</label>
+      <select id="project-history" disabled></select>
+      <button id="open-project-button" class="button button-quiet" type="submit" disabled data-auth-text="auth.openProject">Abrir projeto</button>
+    </form>
+    <p id="account-notice" class="auth-notice" role="status" aria-live="polite" hidden></p>
+  </section>
+  <main id="studio" hidden>
     <section class="intro" aria-labelledby="page-title">
       <div><p class="eyebrow"><span></span> IMAGEM + MÚSICA + MOVIMENTO</p><h1 id="page-title">Sua imagem.<br> Um novo <em>ritmo.</em></h1><p class="intro-copy">Encontre a batida. Ajuste o movimento. Dê play.</p></div>
       <div class="intro-aside"><span class="studio-label">HEADBOP STUDIO</span><span class="edition">01 / CRIE NO SEU TEMPO</span><div class="mini-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
@@ -32,7 +59,7 @@
             <label class="file-drop" id="audio-drop" for="audio-file"><span class="upload-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M9 17V5l11-2v12M9 8l11-2"/><ellipse cx="5.5" cy="17.5" rx="3.5" ry="2.5"/><ellipse cx="16.5" cy="15.5" rx="3.5" ry="2.5"/></svg></span><span class="file-description"><strong id="audio-name">Escolha sua música</strong><span>Áudio · de 0,5 a 30 s · até 20 MB</span></span><span class="file-add" aria-hidden="true">+</span><input id="audio-file" name="audio" type="file" accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg,.aac" required></label>
             <button id="analyze-button" class="button button-primary full-width" type="submit" disabled><span aria-hidden="true">✦</span> Analisar e criar <span aria-hidden="true">→</span></button>
           </form>
-          <p class="small-note">Os arquivos ficam neste servidor, sem envio a serviços de IA. Sessões temporárias; baixe o projeto para guardar.</p>
+          <p class="small-note">Os arquivos são processados neste servidor, sem envio a serviços de IA externos. As sessões são temporárias; baixe o vídeo ou projeto para guardar.</p>
         </section>
 
         <section class="panel motion-panel" aria-labelledby="motion-title">
@@ -57,7 +84,7 @@
               <div class="range-heading"><label for="squash">Elasticidade</label><output id="squash-value" for="squash">25%</output></div><input id="squash" class="range" type="range" min="0" max="1" value="0.25" step="0.05"><div class="range-labels"><span>Rígido</span><span>Elástico</span></div>
             </fieldset></details>
           </fieldset>
-          <p id="reference-note" class="reference-note">Vídeo de referência indisponível. Nenhum preset de referência está ativo.</p>
+          <p id="reference-note" class="reference-note">Os resultados dependem da imagem e da música. Revise a prévia antes de exportar.</p>
         </section>
       </aside>
 
@@ -69,7 +96,7 @@
             <div id="stage-empty" class="stage-empty"><div class="empty-art" aria-hidden="true"><div class="orbit orbit-1"></div><div class="orbit orbit-2"></div><div class="record"><span></span></div><span class="floating-note note-one">♪</span><span class="floating-note note-two">♫</span></div><h3>Todo movimento começa<br>com uma boa batida.</h3><p>Adicione uma imagem e um trecho de música<br>para encontrar o seu ritmo.</p><span class="empty-tag">SEUS ARQUIVOS. SUA CRIAÇÃO.</span></div>
             <canvas id="image-canvas" hidden aria-label="Imagem do projeto. Ao selecionar área, arraste sobre a cabeça ou personagem."></canvas>
             <video id="preview-video" controls playsinline preload="metadata" hidden aria-label="Vídeo renderizado com áudio"></video>
-            <div id="render-overlay" class="render-overlay" hidden><span class="spinner" aria-hidden="true"></span><strong id="render-label">Preparando seu movimento…</strong><span>O preview será o mesmo arquivo da exportação.</span></div>
+            <div id="render-overlay" class="render-overlay" hidden role="status" aria-live="polite" aria-atomic="true"><span class="spinner" aria-hidden="true"></span><strong id="render-label">Preparando seu movimento…</strong><div id="render-progress-track" class="render-progress-track indeterminate" role="progressbar" aria-label="Progresso da operação" aria-valuemin="0" aria-valuemax="100"><span id="render-progress-fill"></span></div><span id="render-progress-detail">Processando…</span><span>O preview será o mesmo arquivo da exportação.</span></div>
           </div>
           <div id="selection-toolbar" class="selection-toolbar" hidden><p id="selection-instruction">Arraste para envolver a cabeça ou personagem.<span> Inclua uma pequena margem de fundo.</span></p><div><button id="cancel-selection" class="button button-quiet" type="button">Cancelar</button><button id="apply-selection" class="button button-primary" type="button" disabled>Aplicar recorte</button></div></div>
           <p id="inspection-note" class="inspection-note" hidden></p>

@@ -3,6 +3,7 @@
 import io
 import logging
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -13,6 +14,8 @@ from pathlib import Path
 
 import soundfile as sf
 from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
+from starlette.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -22,14 +25,22 @@ from .animation import generate_keyframes, generate_motion
 from .audio import analyze_audio
 from .formats import export_project, import_project
 from .imaging import segment_image
-from .renderer import render_video
+from .auth import AuthBusyError, AuthStore, InvalidCredentialsError, normalize_username
+from .jobs import run_render_job
+from .security import (Admission, COOKIE, SAFE_METHODS, SecurityConfig, check_csrf, fail)
 from .rigging import build_rig
 from .settings import Settings, effective_settings
-from .store import Store
+from .store import MIB, QuotaError, Store
 
 MAX_UPLOAD = 20 * 1024 * 1024
 MAX_XML = 64 * 1024 * 1024
 LOGGER = logging.getLogger("headbop")
+
+
+class Login(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(max_length=128)
 
 
 class Selection(BaseModel):
@@ -83,7 +94,7 @@ def normalize_audio(data: bytes, target: Path):
             "wav,mp3,flac,ogg,mov,matroska,aac", "-threads", "1", "-i", str(source),
             "-vn", "-t", "31", "-ac", "1", "-ar", "22050", "-c:a", "pcm_s16le",
             str(target),
-        ], capture_output=True, timeout=45)
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=45)
         if process.returncode:
             raise ValueError("Áudio inválido ou formato não suportado pelo FFmpeg.")
         info = sf.info(target)
@@ -105,7 +116,7 @@ def frames_for(project: dict) -> list[dict]:
 
 
 def public(project: dict) -> dict:
-    result = {key: value for key, value in project.items() if key != "render"}
+    result = {key: value for key, value in project.items() if key not in {"render", "owner_id"}}
     result["settings"] = effective_settings(project["settings"])
     result["mask_url"] = project.get("foreground_url")
     result["capabilities"] = {"reference_available": False}
@@ -116,30 +127,52 @@ def public(project: dict) -> dict:
 
 def create_app(data_dir: Path | None = None) -> FastAPI:
     store = Store(data_dir or Path(os.getenv("HEADBOP_DATA_DIR", "/tmp/headbop-ai")))
+    auth = AuthStore(store.root / "security.sqlite3")
+    config = SecurityConfig.from_env()
+    admission = Admission()
     pool = None
     stop = threading.Event()
+    progress_lock = threading.Lock()
+    # Progress is transient and scoped to the current single-worker server.
+    render_progress: dict[str, int] = {}
 
     def cleanup_loop():
         while not stop.wait(300):
             store.cleanup()
+            auth.cleanup()
 
     @asynccontextmanager
     async def lifespan(_app):
         nonlocal pool, stop
-        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="headbop-render")
-        stop = threading.Event()
-        store.cleanup()
-        cleaner = threading.Thread(target=cleanup_loop, daemon=True)
-        cleaner.start()
-        yield
-        stop.set()
-        pool.shutdown(wait=True)
-        cleaner.join(timeout=1)
-        pool = None
+        config.validate()
+        with store.instance():
+            store.recover()
+            pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="headbop-render")
+            stop = threading.Event()
+            store.cleanup()
+            cleaner = threading.Thread(target=cleanup_loop, daemon=True)
+            cleaner.start()
+            try:
+                yield
+            finally:
+                stop.set()
+                pool.shutdown(wait=True)
+                cleaner.join(timeout=1)
+                pool = None
 
     app = FastAPI(title="Headbop AI", version="2.0.0", lifespan=lifespan,
                   docs_url=None, redoc_url=None)
     app.state.store = store
+    app.state.auth = auth
+    app.state.config = config
+    app.state.admission = admission
+
+    def body_limit(path):
+        if path == "/api/import":
+            return MAX_XML
+        if path == "/api/projects":
+            return 2 * MAX_UPLOAD + 65536
+        return 65536
 
     class BodyLimit:
         def __init__(self, app):
@@ -147,33 +180,93 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
 
         async def __call__(self, scope, receive, send):
             received = 0
-            limit = MAX_XML if scope.get("path") == "/api/import" else 2 * MAX_UPLOAD + 65536
+            limit = body_limit(scope.get("path", ""))
 
             async def limited_receive():
                 nonlocal received
                 message = await receive()
                 received += len(message.get("body", b""))
                 if received > limit:
-                    raise HTTPException(413, "Envio excede o limite permitido.")
+                    fail(413, "upload_too_large")
                 return message
 
             await self.app(scope, limited_receive, send)
 
     app.add_middleware(BodyLimit)
 
-    @app.middleware("http")
-    async def limits_and_headers(request: Request, call_next):
-        if request.method in {"POST", "PUT"}:
+    def error_response(exc):
+        payload = exc.detail if isinstance(exc.detail, dict) else {"detail": exc.detail}
+        return JSONResponse(payload, status_code=exc.status_code, headers=exc.headers)
+
+    def consume(key, limit, seconds):
+        retry = auth.consume_rate(key, limit, seconds)
+        if retry:
+            fail(429, "rate_limited", seconds=retry)
+
+    def guard(request):
+        path = request.url.path
+        if not (path.startswith("/api/") or path == "/openapi.json") or path == "/api/health":
+            return
+        config.request_origin(request)
+        peer = request.client.host if request.client else "unknown"
+        # Only the ASGI server's explicitly trusted proxy can supply client IPs.
+        # Raw X-Forwarded-For never participates in identity/rate calculations.
+        consume("api-global", 3000, 60)
+        consume("api-ip:" + peer, 600, 60)
+        if request.method not in SAFE_METHODS:
+            config.check_origin(request)
+        if path == "/api/auth/login" and request.method == "POST":
+            consume("login-global", 60, 60)
+            consume("login-ip:" + peer, 10, 600)
+        else:
+            session = auth.get_session(request.cookies.get(COOKIE))
+            if session is None:
+                fail(401, "auth_required")
+            request.state.session = session
+            request.state.user = session["user"]
+            consume("api-user:" + session["user"]["id"], 600, 60)
+            if request.method not in SAFE_METHODS:
+                check_csrf(request, session)
+            match = re.match(r"^/api/projects/([^/]+)", path)
+            if match:
+                try:
+                    store.authorize(match[1], session["user"]["id"])
+                except FileNotFoundError:
+                    fail(404, "project_not_found")
+        if request.method in {"POST", "PUT", "PATCH"}:
             length = request.headers.get("content-length")
             if length is None:
-                return JSONResponse({"detail": "Informe Content-Length no envio."}, status_code=411)
+                fail(411, "content_length_required")
             try:
-                limit = MAX_XML if request.url.path == "/api/import" else 2 * MAX_UPLOAD + 65536
-                if not 0 <= int(length) <= limit:
+                if not 0 <= int(length) <= body_limit(path):
                     raise ValueError
             except ValueError:
-                return JSONResponse({"detail": "Envio grande demais ou tamanho inválido."}, status_code=413)
-        response = await call_next(request)
+                fail(413, "upload_too_large")
+        creating = request.method == "POST" and path in {"/api/projects", "/api/import"}
+        editing = request.method in {"POST", "PUT"} and path.endswith(("/segment", "/rig", "/settings"))
+        if creating or editing:
+            user_id = request.state.user["id"]
+            consume("analysis-user:" + user_id, 60, 3600)
+            admission.enter(user_id)
+            request.state.admitted = user_id
+            try:
+                request.state.reservation = store.reserve(user_id, 128 * MIB if creating else 32 * MIB,
+                                                          projects=1 if creating else 0)
+            except QuotaError as exc:
+                fail(429, exc.code, seconds=60)
+
+    @app.middleware("http")
+    async def limits_and_headers(request: Request, call_next):
+        try:
+            await run_in_threadpool(guard, request)
+            response = await call_next(request)
+        except HTTPException as exc:
+            response = error_response(exc)
+        finally:
+            if token := getattr(request.state, "reservation", None):
+                await run_in_threadpool(store.release, token)
+            if user_id := getattr(request.state, "admitted", None):
+                admission.leave(user_id)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Content-Security-Policy"] = (
@@ -182,23 +275,84 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             "frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
         )
         response.headers["Cache-Control"] = "no-store"
+        if config.secure_cookie:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000"
         return response
+
+    @app.exception_handler(HTTPException)
+    async def http_error(_request, exc):
+        return error_response(exc)
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_schema(_request, _exc):
+        return JSONResponse({"code": "invalid_request", "params": {}}, status_code=422)
 
     @app.exception_handler(ValueError)
     async def invalid(_request, exc):
-        return JSONResponse({"detail": str(exc)}, status_code=422)
+        if isinstance(exc, QuotaError):
+            return JSONResponse({"code": exc.code, "params": {}}, status_code=429,
+                                headers={"Retry-After": "60"})
+        return JSONResponse({"code": "invalid_request", "detail": str(exc)}, status_code=422)
 
     @app.exception_handler(FileNotFoundError)
     async def missing(_request, _exc):
-        return JSONResponse({"detail": "Projeto ou arquivo não encontrado."}, status_code=404)
+        return JSONResponse({"code": "project_not_found"}, status_code=404)
+
+    @app.post("/api/auth/login")
+    def login(credentials: Login):
+        try:
+            username_bucket = normalize_username(credentials.username)
+        except ValueError:
+            username_bucket = "!invalid"
+        consume("login-user:" + username_bucket, 10, 600)
+        try:
+            session = auth.login(credentials.username, credentials.password)
+        except AuthBusyError:
+            fail(429, "auth_busy", seconds=2)
+        except (ValueError, InvalidCredentialsError):
+            session = None
+        if session is None:
+            fail(401, "invalid_credentials")
+        response = JSONResponse({key: session[key] for key in ("user", "csrf", "expires_at")})
+        response.set_cookie(COOKIE, session["token"], max_age=int(auth.session_ttl_seconds),
+                            httponly=True, secure=config.secure_cookie, samesite="strict", path="/")
+        return response
+
+    @app.get("/api/auth/session")
+    def session(request: Request):
+        return request.state.session
+
+    @app.post("/api/auth/logout", status_code=204)
+    def logout(request: Request):
+        auth.revoke_session(request.cookies.get(COOKIE))
+        response = Response(status_code=204)
+        response.delete_cookie(COOKIE, path="/", secure=config.secure_cookie,
+                               httponly=True, samesite="strict")
+        return response
+
+    @app.get("/api/projects")
+    def list_projects(request: Request):
+        return {"projects": store.list_owned(request.state.user["id"])}
 
     def ensure_idle(project_id):
         if project_id in store.active:
             raise HTTPException(409, "Aguarde a renderização atual terminar.")
 
     def reset_render(project):
+        with progress_lock:
+            render_progress.pop(project["id"], None)
         project["render"] = {"status": "idle", "video_url": None, "error": None}
         (store.path(project["id"]) / "video.mp4").unlink(missing_ok=True)
+
+    def check_ready_output(project):
+        """A persisted ready flag cannot outlive a missing/truncated output file."""
+        if project["render"]["status"] != "ready":
+            return
+        output = store.path(project["id"]) / "video.mp4"
+        if not output.is_file() or output.is_symlink() or output.stat().st_size == 0:
+            project["render"] = {"status": "error", "video_url": None,
+                                 "error": "render_failed", "code": "render_failed"}
+            store.write(project)
 
     def prepare_rig(project, path, head_rect=None):
         # Old stored projects have no anatomy/confidence metadata. Add conservative
@@ -212,11 +366,11 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
 
     def build(image_data: bytes, audio_data: bytes, settings=None, rect=None,
               head_rect=None, restored_frames=None, restored_duration=None,
-              foreground_data=None, segmentation_info=None):
+              foreground_data=None, segmentation_info=None, *, owner_id, reservation):
         with store.lock:
             if len(store.building) >= 2:
                 raise HTTPException(429, "Há análises em andamento. Tente novamente em instantes.")
-            project_id, path = store.create()
+            project_id, path = store.create(owner_id, reservation)
         try:
             width, height = normalize_image(image_data, path / "image.png")
             normalize_audio(audio_data, path / "audio.wav")
@@ -273,8 +427,9 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         return {"status": "ok", "ffmpeg": bool(shutil.which("ffmpeg"))}
 
     @app.post("/api/projects", status_code=201)
-    def upload(image: UploadFile, audio: UploadFile):
-        return build(read_upload(image, MAX_UPLOAD), read_upload(audio, MAX_UPLOAD))
+    def upload(request: Request, image: UploadFile, audio: UploadFile):
+        return build(read_upload(image, MAX_UPLOAD), read_upload(audio, MAX_UPLOAD),
+                     owner_id=request.state.user["id"], reservation=request.state.reservation)
 
     @app.get("/api/projects/{project_id}")
     def get_project(project_id: str):
@@ -335,7 +490,21 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             store.write(project)
             return public(project)
 
-    def render_job(project_id):
+    def publish_progress(project_id: str, completed: int, total: int) -> None:
+        # Avoid writing project.json for every rendered frame.
+        with progress_lock:
+            render_progress[project_id] = min(95, 5 + round(90 * completed / max(1, total)))
+
+    def render_response(project):
+        result = dict(project["render"])
+        with progress_lock:
+            result["progress"] = 100 if result["status"] == "ready" else render_progress.get(project["id"], 0)
+        # One running job and one waiting job can consume two complete budgets.
+        # Clients establish a fixed deadline after POST, never extend it on polls.
+        result["timeout_seconds"] = 2 * config.render_timeout + 30
+        return result
+
+    def render_job(project_id, reservation):
         project = None
         try:
             with store.lock:
@@ -343,48 +512,63 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
                 project["render"]["status"] = "rendering"
                 store.write(project)
             path = store.path(project_id)
-            render_video(path / "image.png", path / "foreground.png" if project["segmentation"]["available"] else None,
-                         path / "audio.wav", path / "video.mp4", project["keyframes"],
-                         project["duration"], project["settings"]["mode"],
-                         settings=effective_settings(project["settings"]), rig=project.get("rig"))
+            run_render_job(path, timeout_seconds=config.render_timeout,
+                           max_output_bytes=config.video_bytes, cancel_event=stop,
+                           progress_callback=lambda done, total: publish_progress(project_id, done, total))
             project["render"] = {"status": "ready", "video_url": f"/api/projects/{project_id}/video", "error": None}
-        except Exception:
+        except Exception as exc:
             LOGGER.exception("Video rendering failed for project %s", project_id)
             if project is not None:
-                project["render"] = {"status": "error", "video_url": None,
-                                     "error": "Não foi possível renderizar. Verifique FFmpeg e tente novamente."}
+                code = "render_timeout" if isinstance(exc, TimeoutError) else "render_failed"
+                project["render"] = {"status": "error", "video_url": None, "error": code, "code": code}
         finally:
             with store.lock:
                 try:
                     if project is not None:
                         store.write(project)
                 finally:
+                    with progress_lock:
+                        render_progress.pop(project_id, None)
                     store.active.discard(project_id)
+                    store.release(reservation)
 
     @app.post("/api/projects/{project_id}/render", status_code=202)
-    def begin_render(project_id: str):
+    def begin_render(project_id: str, request: Request):
         with store.lock:
-            if pool is None:
-                raise HTTPException(503, "Servidor ainda está iniciando.")
+            if pool is None or stop.is_set():
+                fail(503, "capacity_busy", seconds=2)
             project = store.read(project_id)
+            check_ready_output(project)
             if project_id in store.active or project["render"]["status"] == "ready":
-                return project["render"]
-            if len(store.active) >= 2:
-                raise HTTPException(429, "Fila de renderização cheia. Tente novamente em instantes.")
-            project["render"] = {"status": "queued", "video_url": None, "error": None}
-            store.write(project)
-            store.active.add(project_id)
-            pool.submit(render_job, project_id)
-            return project["render"]
+                return render_response(project)
+            owner_id = request.state.user["id"]
+            if len(store.active) >= 2 or any(store.owner(pid) == owner_id for pid in store.active):
+                fail(429, "capacity_busy", seconds=2)
+            consume("render-user:" + owner_id, 30, 3600)
+            reservation = store.reserve(owner_id, config.video_bytes)
+            try:
+                project["render"] = {"status": "queued", "video_url": None, "error": None}
+                with progress_lock:
+                    render_progress[project_id] = 0
+                store.write(project)
+                store.active.add(project_id)
+                pool.submit(render_job, project_id, reservation)
+            except Exception:
+                store.active.discard(project_id)
+                store.release(reservation)
+                raise
+            return render_response(project)
 
     @app.get("/api/projects/{project_id}/render")
     def render_status(project_id: str):
         with store.lock:
             project = store.read(project_id)
+            check_ready_output(project)
             if project["render"]["status"] in {"queued", "rendering"} and project_id not in store.active:
-                reset_render(project)
+                project["render"] = {"status": "error", "video_url": None,
+                                     "error": "render_failed", "code": "render_failed"}
                 store.write(project)
-            return project["render"]
+            return render_response(project)
 
     @app.get("/api/projects/{project_id}/video")
     def video(project_id: str, download: bool = False):
@@ -420,14 +604,15 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         return Response(data, media_type="application/xml", headers={"Content-Disposition": 'attachment; filename="headbop.xml"'})
 
     @app.post("/api/import", status_code=201)
-    def import_xml(file: UploadFile):
+    def import_xml(request: Request, file: UploadFile):
         parsed = import_project(read_upload(file, MAX_XML - 65536))
         selected = parsed["settings"]
         if parsed["schema_version"] == 1:
             selected = {**selected, "engine": "legacy"}
         return build(parsed["image"], parsed["audio"], selected, parsed.get("rect"),
                      parsed.get("head_rect"), parsed["keyframes"], parsed["duration"],
-                     parsed.get("foreground"), parsed.get("segmentation_info"))
+                     parsed.get("foreground"), parsed.get("segmentation_info"),
+                     owner_id=request.state.user["id"], reservation=request.state.reservation)
 
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
     app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="web")

@@ -15,7 +15,8 @@ COPY headbop ./headbop
 RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export PIP_CERT=/run/secrets/proxy_ca; fi; \
     pip install --no-cache-dir --no-deps .
-RUN useradd --create-home --uid 10001 headbop && chmod -R a+rX /app
+RUN useradd --create-home --uid 10001 headbop && mkdir -p /data \
+    && chown headbop:headbop /data && chmod -R a+rX /app
 USER headbop
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"

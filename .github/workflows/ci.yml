@@ -25,6 +25,7 @@ jobs:
           set -o pipefail
           mkdir -p test-results
           python scripts/browser_smoke.py 2>&1 | tee test-results/browser-command.log
+          python scripts/i18n_browser_test.py
       - name: Browser failure summary
         if: failure()
         run: |
@@ -50,7 +51,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, Node 24
       - run: docker build -t headbop-ai .
       - run: |
-          docker run -d --name headbop -p 127.0.0.1:8000:8000 headbop-ai
+          docker run -d --name headbop -e HEADBOP_ENV=production -e HEADBOP_PUBLIC_ORIGIN=https://studio.example.com -p 127.0.0.1:8000:8000 headbop-ai
           for i in $(seq 1 30); do
             if curl --fail http://127.0.0.1:8000/api/health; then exit 0; fi
             sleep 2

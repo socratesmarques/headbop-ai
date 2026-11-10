@@ -1,6 +1,9 @@
 import json
+import os
 import shutil
 import subprocess
+import sys
+import time
 
 import numpy as np
 import pytest
@@ -275,3 +278,60 @@ def test_rig_metadata_cannot_select_external_assets(split_scene, tmp_path):
     rig["layers"] = {name: "/does/not/exist.png" for name in ("background", "body", "head")}
     scene = _prepare_scene(image, None, "subject", {}, rig)
     np.testing.assert_array_equal(_render_frame(scene, identity()), source)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX executable/process-group regression")
+@pytest.mark.parametrize("consume_input", [False, True])
+def test_encoder_timeout_covers_blocked_writes_and_final_mux(
+        media, tmp_path, monkeypatch, consume_input):
+    """The old timeout was unreachable while FFmpeg stopped consuming stdin."""
+    encoder = tmp_path / "ffmpeg"
+    encoder.write_text(
+        f"#!{sys.executable}\n"
+        "import pathlib, sys, time\n"
+        "pathlib.Path(sys.argv[-1]).write_bytes(b'partial')\n"
+        + ("sys.stdin.buffer.read()\n" if consume_input else "")
+        + "time.sleep(60)\n")
+    encoder.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
+    original_popen = subprocess.Popen
+    encoders = []
+
+    def capture_process(*args, **kwargs):
+        process = original_popen(*args, **kwargs)
+        encoders.append(process)
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", capture_process)
+    output = tmp_path / "video.mp4"
+    started = time.monotonic()
+    with pytest.raises(TimeoutError):
+        render_video(media[0], None, media[1], output, frames(), 1.0, "whole",
+                     timeout_seconds=0.5)
+    assert time.monotonic() - started < 3
+    assert len(encoders) == 1 and encoders[0].returncode is not None
+    assert encoders[0].stdin.closed
+    assert not output.exists()
+    assert not output.with_name("video.mp4.partial.mp4").exists()
+
+
+def test_callback_failure_reaps_encoder_and_removes_partial(media, tmp_path, monkeypatch):
+    original_popen = subprocess.Popen
+    encoders = []
+
+    def capture_process(*args, **kwargs):
+        process = original_popen(*args, **kwargs)
+        encoders.append(process)
+        return process
+
+    def failed_callback(done, total):
+        raise RuntimeError("callback failed")
+
+    monkeypatch.setattr(subprocess, "Popen", capture_process)
+    output = tmp_path / "video.mp4"
+    with pytest.raises(RuntimeError, match="callback failed"):
+        render_video(media[0], None, media[1], output, frames(), 1.0, "whole",
+                     progress_callback=failed_callback)
+    assert encoders[0].returncode is not None and encoders[0].stdin.closed
+    assert not output.exists()
+    assert not output.with_name("video.mp4.partial.mp4").exists()
