@@ -11,43 +11,74 @@
   <meta property="og:description" content="Transforme imagem e música em uma animação sincronizada e exporte seu MP4.">
   <meta name="twitter:card" content="summary">
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/landing.css">
   <script src="/static/i18n.js" defer></script>
   <script src="/static/auth.js" defer></script>
+  <script src="/static/brush.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
-<body>
-  <a class="skip-link" href="#studio">Ir para o estúdio</a>
+<body class="page-home">
+  <a class="skip-link" href="#home" data-i18n="home.skip">Pular para o conteúdo</a>
   <header class="site-header">
-    <a class="brand" href="/" aria-label="Headbop AI, início"><span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i><i></i></span>headbop<span class="brand-ai">AI</span></a>
-    <div class="header-right"><span class="local-badge"><span class="status-dot"></span>Processamento no servidor</span><label class="sr-only" for="language-select">Idioma da interface</label><select id="language-select" class="language-select" aria-label="Idioma da interface"><option value="pt-BR">Português</option><option value="en">English</option><option value="es">Español</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="it">Italiano</option><option value="zh-CN">简体中文</option><option value="hi">हिन्दी</option></select><button id="import-button" class="button button-quiet" type="button"><span aria-hidden="true">↗</span> Abrir projeto</button><input id="import-file" type="file" accept=".xml,application/xml,text/xml" hidden></div>
+    <a class="brand" href="#home" aria-label="Headbop AI, início"><span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i><i></i></span>headbop<span class="brand-ai">AI</span></a>
+    <nav class="home-nav" aria-label="Headbop"><a href="#how-it-works" data-i18n="home.navHow">Como funciona</a><a href="https://github.com/socratesmarques/headbop-ai" target="_blank" rel="noopener noreferrer">GitHub <svg class="ui-arrow" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M5 19 19 5M5 5h14v14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a></nav>
+    <div class="header-right"><label class="sr-only" for="language-select">Idioma da interface</label><select id="language-select" class="language-select" aria-label="Idioma da interface"><option value="pt-BR">Português</option><option value="en">English</option><option value="es">Español</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="it">Italiano</option><option value="zh-CN">简体中文</option><option value="hi">हिन्दी</option></select><a id="header-start" class="home-button home-button-small" href="#studio"><span data-i18n="home.start">Começar a criar</span><svg class="ui-arrow" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M5 19 19 5M5 5h14v14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a><a id="back-home" class="button button-quiet" href="#home" hidden data-i18n="guest.back">Voltar à home</a><button id="import-button" class="button button-quiet" type="button" hidden><svg class="ui-arrow" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M5 19 19 5M5 5h14v14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg> Abrir projeto</button><input id="import-file" type="file" accept=".xml,application/xml,text/xml" hidden></div>
   </header>
-
-  <section id="auth-panel" class="auth-panel panel" aria-labelledby="auth-title">
-    <h1 id="auth-title" data-auth-text="auth.title">Entrar no Headbop AI</h1>
-    <form id="login-form">
-      <label for="login-username" data-auth-text="auth.username">Usuário</label>
-      <input id="login-username" name="username" autocomplete="username" required maxlength="64" autocapitalize="none" spellcheck="false">
-      <label for="login-password" data-auth-text="auth.password">Senha</label>
-      <input id="login-password" name="password" type="password" autocomplete="current-password" required maxlength="128">
-      <button id="login-button" class="button button-primary" type="submit" data-auth-text="auth.signIn">Entrar</button>
-    </form>
-    <p class="small-note" data-auth-text="auth.accountHelp">Solicite sua conta ao administrador.</p>
-    <p id="auth-notice" class="auth-notice" role="status" aria-live="polite" hidden></p>
-  </section>
+  <main id="home" class="landing">
+    <section class="home-hero" aria-labelledby="home-title">
+      <div class="hero-copy">
+        <p class="home-eyebrow"><span class="hero-dot" aria-hidden="true"></span><span data-i18n="home.kicker">MENOS COMPLICAÇÃO. MAIS MOVIMENTO.</span></p>
+        <h1 id="home-title"><span data-i18n="home.title1">Sua imagem.</span><br><span data-i18n="home.title2">Um novo</span> <em data-i18n="home.title3">ritmo.</em><span class="title-star" aria-hidden="true">✳</span></h1>
+        <p class="hero-description" data-i18n="home.description">Uma imagem, uma música e a sua criatividade. Pinte o que vai se mover e transforme a batida em vídeo.</p>
+        <div class="hero-actions"><a id="start-creating" class="home-button" href="#studio"><span data-i18n="home.create">Criar meu vídeo</span><svg class="ui-arrow" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M5 19 19 5M5 5h14v14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a><a class="home-text-link" href="https://github.com/socratesmarques/headbop-ai" target="_blank" rel="noopener noreferrer"><span data-i18n="home.code">Explorar o código</span><svg class="ui-arrow" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M5 19 19 5M5 5h14v14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a></div>
+        <p class="hero-footnote"><span aria-hidden="true">✓</span> <span data-i18n="home.free">Grátis. Sem cadastro. Direto no navegador.</span></p>
+        <div id="home-notice" class="home-notice" role="status" aria-live="polite" hidden></div>
+      </div>
+      <div class="hero-art" id="hero-demo">
+        <div class="demo-top"><span class="demo-dots" aria-hidden="true"><i></i><i></i><i></i></span><span data-i18n="home.demo">DO TRAÇO AO MOVIMENTO</span><span aria-hidden="true">01 / 03</span></div>
+        <div class="demo-scene">
+          <span class="scene-spark spark-one" aria-hidden="true">✦</span><span class="scene-spark spark-two" aria-hidden="true">✳</span>
+          <svg class="demo-character" viewBox="0 0 460 440" role="img" data-i18n-aria="home.demoLabel" aria-label="Ilustração de um personagem com fones, com a cabeça selecionada para se mover.">
+            <ellipse cx="231" cy="405" rx="110" ry="13" fill="#191d23" opacity=".12"/>
+            <path d="M142 415v-99c0-49 39-81 88-81s88 32 88 81v99" fill="#7862f3" stroke="#22252b" stroke-width="4"/>
+            <path d="M141 326 103 376l34 22 31-31m150-41 39 50-34 22-31-31" fill="#7862f3" stroke="#22252b" stroke-width="4" stroke-linejoin="round"/>
+            <path d="M190 263c6 22 72 22 80 0" fill="#e5944d" stroke="#22252b" stroke-width="4"/>
+            <g class="demo-head">
+              <path d="M141 153c0-62 39-96 89-96s89 34 89 96v67c0 43-40 75-89 75s-89-32-89-75Z" fill="#ffb76d" stroke="#22252b" stroke-width="4"/>
+              <path d="M142 158c-8-51 17-105 59-109 10-32 47-32 62-14 43-6 63 23 60 58 26 19 12 56-7 67-12-8-15-30-13-43-39 11-67-8-76-28-16 34-54 46-85 37" fill="#22252b"/>
+              <path d="M141 189c-13-2-20 12-17 24 3 12 10 17 19 17m174-41c13-2 20 12 17 24-3 12-10 17-19 17" fill="#ffb76d" stroke="#22252b" stroke-width="4"/>
+              <path d="M180 187q14-15 28 0m48 0q14-15 28 0" fill="none" stroke="#22252b" stroke-width="5" stroke-linecap="round"/>
+              <path d="M209 229q21 27 43 0Z" fill="#fff9ed" stroke="#22252b" stroke-width="4" stroke-linejoin="round"/>
+              <path d="m233 193-5 20h10" fill="none" stroke="#c9753d" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M126 178v-38c0-65 45-100 105-100s105 35 105 100v38" fill="none" stroke="#b9ee54" stroke-width="16"/>
+              <rect x="115" y="168" width="31" height="62" rx="12" fill="#b9ee54" stroke="#22252b" stroke-width="4"/><rect x="315" y="168" width="31" height="62" rx="12" fill="#b9ee54" stroke="#22252b" stroke-width="4"/>
+              <path d="M103 150C85 74 153 16 228 16c86-3 145 68 130 150l-5 72c-15 52-76 82-126 78-71 2-124-37-130-84Z" fill="none" stroke="#516a21" stroke-width="2" stroke-dasharray="7 7"/>
+            </g>
+            <path d="M217 338h26m-13-13v26" stroke="#e7e1ff" stroke-width="5" stroke-linecap="round"/>
+          </svg>
+          <span class="selection-tag"><i aria-hidden="true"></i><span data-i18n="home.selected">ÁREA SELECIONADA</span></span>
+          <div class="brush-cursor-art" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="m21 4 7 7-13 13-7-7Z" fill="#22252b"/><path d="M7 21c-6 1-1 7-5 9 8 2 13-3 10-7Z" fill="#22252b"/></svg><span>+</span></div>
+        </div>
+        <div class="demo-player"><button id="demo-toggle" type="button" aria-pressed="false" aria-label="Pausar demonstração"><span id="demo-toggle-icon" aria-hidden="true">Ⅱ</span></button><div class="demo-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span class="demo-time" aria-hidden="true">00:08 / 00:30</span></div>
+        <p class="demo-caption" data-i18n="home.demoCaption">Você escolhe o que ganha vida.</p>
+      </div>
+    </section>
+    <div class="home-feature-strip"><span><i aria-hidden="true">✳</i><span data-i18n="home.strip1">Pincel inteligente</span></span><span><i aria-hidden="true">♫</i><span data-i18n="home.strip2">No ritmo da música</span></span><span><svg class="ui-arrow" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M5 19 19 5M5 5h14v14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="home.strip3">Seu vídeo em MP4</span></span><span><i aria-hidden="true">⌘</i><span data-i18n="home.strip4">100% código aberto</span></span></div>
+    <section id="how-it-works" class="home-how" aria-labelledby="how-title"><p class="home-eyebrow" data-i18n="home.howKicker">DO ZERO AO PLAY</p><h2 id="how-title" data-i18n="home.howTitle">Três passos. Muitas possibilidades.</h2><div class="how-grid">
+      <article><span class="how-number">01</span><div class="how-icon" aria-hidden="true">▧ + ♫</div><h3 data-i18n="home.step1Title">Encontre sua combinação.</h3><p data-i18n="home.step1Text">Escolha uma imagem e até 30 segundos da sua música. A gente encontra a batida.</p></article>
+      <article><span class="how-number">02</span><div class="how-icon how-icon-paint" aria-hidden="true">✳</div><h3 data-i18n="home.step2Title">Pinte o movimento.</h3><p data-i18n="home.step2Text">Passe o pincel por dentro da área desejada. Ajuste as bordas com a borracha e deixe o resto parado.</p></article>
+      <article><span class="how-number">03</span><div class="how-icon" aria-hidden="true">▷</div><h3 data-i18n="home.step3Title">Dê play na sua ideia.</h3><p data-i18n="home.step3Text">Ajuste o ritmo, confira o resultado e baixe o MP4. Salve o projeto para continuar depois.</p></article>
+    </div></section>
+    <section class="home-open"><div><span class="open-symbol" aria-hidden="true">{ }</span><h2 data-i18n="home.openTitle">Criatividade livre. Código também.</h2><p data-i18n="home.openText">Headbop AI é um projeto open source. Use, explore como funciona e ajude a construir o próximo movimento.</p></div><a class="home-button home-button-light" href="https://github.com/socratesmarques/headbop-ai" target="_blank" rel="noopener noreferrer"><span data-i18n="home.github">Ver projeto no GitHub</span><svg class="ui-arrow" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M5 19 19 5M5 5h14v14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a></section>
+    <footer class="home-footer"><a class="brand" href="#home">headbop<span class="brand-ai">AI</span></a><span data-i18n="home.footer">Feito para transformar ritmo em movimento.</span><a href="https://github.com/socratesmarques/headbop-ai" target="_blank" rel="noopener noreferrer">GitHub <svg class="ui-arrow" viewBox="0 0 24 24" aria-hidden="true" fill="none"><path d="M5 19 19 5M5 5h14v14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a></footer>
+  </main>
   <section id="account-panel" class="account-panel" hidden>
-    <div class="account-heading"><p id="account-user"></p><button id="logout-button" class="button button-quiet" type="button" data-auth-text="auth.signOut">Sair</button></div>
-    <form id="project-history-form" class="project-history-form">
-      <label for="project-history" data-auth-text="auth.projects">Meus projetos</label>
-      <select id="project-history" disabled></select>
-      <button id="open-project-button" class="button button-quiet" type="submit" disabled data-auth-text="auth.openProject">Abrir projeto</button>
-    </form>
+    <div class="account-heading"><p id="account-user" data-i18n="guest.workspace">Seu espaço de criação</p><p class="workspace-privacy" data-i18n="guest.note">Projetos temporários neste navegador. Salve o XML para guardar ou abrir em outro dispositivo.</p></div>
+    <form id="project-history-form" class="project-history-form"><label for="project-history" data-i18n="guest.history">Seus projetos recentes</label><select id="project-history" disabled></select><button id="open-project-button" class="button button-quiet" type="submit" disabled data-i18n="auth.openProject">Abrir projeto</button></form>
     <p id="account-notice" class="auth-notice" role="status" aria-live="polite" hidden></p>
   </section>
   <main id="studio" hidden>
-    <section class="intro" aria-labelledby="page-title">
-      <div><p class="eyebrow"><span></span> IMAGEM + MÚSICA + MOVIMENTO</p><h1 id="page-title">Sua imagem.<br> Um novo <em>ritmo.</em></h1><p class="intro-copy">Encontre a batida. Ajuste o movimento. Dê play.</p></div>
-      <div class="intro-aside"><span class="studio-label">HEADBOP STUDIO</span><span class="edition">01 / CRIE NO SEU TEMPO</span><div class="mini-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
-    </section>
+    <section class="intro" aria-labelledby="page-title"><div><p class="eyebrow" data-i18n="studio.step">01 · ENVIE / 02 · PINTE / 03 · DÊ PLAY</p><h1 id="page-title" data-i18n="studio.title">Seu próximo movimento.</h1><p class="intro-copy" data-i18n="studio.subtitle">Comece com os arquivos. Depois, pinte o que vai dançar.</p></div></section>
 
     <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
     <div class="studio-grid">
@@ -67,8 +98,9 @@
           <fieldset id="animation-controls" disabled>
             <legend class="sr-only">Configuração da animação</legend>
             <div class="control-label">O que vai se mover</div>
-            <div class="segmented" role="group" aria-label="Área animada"><button class="segment-button active" data-mode="whole" type="button" aria-pressed="true">Imagem inteira</button><button class="segment-button" data-mode="subject" type="button" aria-pressed="false">Cabeça / personagem</button></div>
-            <div id="segmentation-info" class="segmentation-info" hidden><p id="segmentation-message"></p><button id="select-region" class="text-button" type="button">Selecionar área na imagem <span aria-hidden="true">↗</span></button></div>
+            <div class="segmented" role="group" aria-label="Área animada"><button class="segment-button active" data-mode="whole" type="button" aria-pressed="true">Imagem inteira</button><button class="segment-button" data-mode="subject" type="button" aria-pressed="false" data-i18n="brush.area">Área pintada</button></div>
+            <button id="paint-region" class="button button-secondary full-width" type="button" data-i18n="brush.open">Pintar área animada</button>
+            <div id="segmentation-info" class="segmentation-info" hidden><p id="segmentation-message"></p><button id="select-region" class="text-button" type="button" data-i18n="brush.rectangle">Recorte por retângulo (opcional)</button></div>
             <div class="control-label motion-label">Estilo da batida</div>
             <div class="motion-options" role="group" aria-label="Estilo de movimento"><button class="motion-option active" type="button" data-motion="auto" aria-pressed="true"><span class="motion-glyph" aria-hidden="true">✦</span><strong>Auto</strong><small>No ritmo</small></button><button class="motion-option" type="button" data-motion="smooth" aria-pressed="false"><span class="motion-glyph" aria-hidden="true">∿</span><strong>Smooth</strong><small>Fluido</small></button><button class="motion-option" type="button" data-motion="hard" aria-pressed="false"><span class="motion-glyph" aria-hidden="true">ϟ</span><strong>Hard</strong><small>Marcado</small></button><button class="motion-option" type="button" data-motion="velocity" aria-pressed="false"><span class="motion-glyph" aria-hidden="true">»</span><strong>Velocity</strong><small>Impulso</small></button></div>
             <div class="tempo-row"><label for="bpm">Tempo <span>BPM</span></label><div class="number-control"><button id="bpm-down" type="button" aria-label="Diminuir BPM">−</button><input id="bpm" type="number" min="40" max="240" step="0.1" value="120" inputmode="decimal"><button id="bpm-up" type="button" aria-label="Aumentar BPM">+</button></div></div>
@@ -91,10 +123,28 @@
       <section class="workspace" aria-label="Prévia e exportação">
         <div class="preview-panel panel">
           <div class="preview-header"><h2><span class="step">03</span> Veja acontecer</h2><span id="preview-state" class="preview-state">AGUARDANDO ARQUIVOS</span></div>
-          <div id="preview-tools" class="preview-tools" hidden><div class="view-options" role="group" aria-label="Visualização da prévia"><button type="button" data-view="video" aria-pressed="false">Vídeo</button><button type="button" data-view="source" aria-pressed="true">Imagem</button><button type="button" data-view="mask" aria-pressed="false">Máscara</button><button type="button" data-view="rig" aria-pressed="false">Pivôs</button></div><button id="select-head" class="text-button" type="button">Marcar cabeça</button></div>
+          <div id="preview-tools" class="preview-tools" hidden><div class="view-options" role="group" aria-label="Visualização da prévia"><button type="button" data-view="video" aria-pressed="false">Vídeo</button><button type="button" data-view="source" aria-pressed="true">Imagem</button><button type="button" data-view="mask" aria-pressed="false">Máscara</button><button type="button" data-view="rig" aria-pressed="false">Pivôs</button></div><button id="select-head" class="text-button" type="button" data-i18n="brush.head">Articular cabeça (opcional)</button></div>
+          <p id="head-help" class="head-help" data-i18n="brush.headHelp" hidden>A pintura define a área que se move. A articulação separa a cabeça dessa área e define seu giro.</p>
+          <section id="brush-panel" class="brush-panel" aria-labelledby="brush-title" hidden>
+  <div class="brush-heading"><strong id="brush-title" data-i18n="brush.title">Escolha o que ganha movimento</strong><span id="brush-status" role="status" aria-live="polite"></span></div>
+  <p id="brush-instruction" data-i18n="brush.instructions">Pinte por dentro da parte desejada. O pincel inteligente encontra as bordas ao aplicar; use Apagar para excluir áreas.</p>
+  <div class="brush-controls">
+    <div class="brush-tools" role="group" aria-label="Ferramentas do pincel" data-i18n-aria="brush.tools">
+      <button id="brush-add" type="button" class="button button-secondary" aria-pressed="true" data-i18n="brush.add">Pintar</button>
+      <button id="brush-erase" type="button" class="button button-quiet" aria-pressed="false" data-i18n="brush.erase">Apagar</button>
+    </div>
+    <label class="brush-size-label" for="brush-size"><span data-i18n="brush.size">Tamanho</span><input id="brush-size" type="range" min="1" max="12" step="0.5" value="4"><output id="brush-size-value" for="brush-size">4%</output></label>
+    <label class="brush-smart-label"><input id="brush-smart" type="checkbox" checked><span data-i18n="brush.smart">Reconhecer bordas</span></label>
+    <button id="brush-undo" type="button" class="button button-quiet" data-i18n="brush.undo">Desfazer</button>
+    <button id="brush-redo" type="button" class="button button-quiet" data-i18n="brush.redo">Refazer</button>
+    <button id="brush-clear" type="button" class="text-button" data-i18n="brush.clear">Limpar pintura</button>
+  </div>
+  <p class="small-note" data-i18n="brush.keyboard">No teclado: setas movem o pincel, Espaço pinta e Esc encerra o traço.</p>
+  <div class="brush-actions"><button id="brush-cancel" type="button" class="button button-quiet" data-i18n="brush.cancel">Cancelar</button><button id="brush-apply" type="button" class="button button-primary" disabled data-i18n="brush.apply">Aplicar seleção</button></div>
+</section>
           <div class="stage" id="stage">
             <div id="stage-empty" class="stage-empty"><div class="empty-art" aria-hidden="true"><div class="orbit orbit-1"></div><div class="orbit orbit-2"></div><div class="record"><span></span></div><span class="floating-note note-one">♪</span><span class="floating-note note-two">♫</span></div><h3>Todo movimento começa<br>com uma boa batida.</h3><p>Adicione uma imagem e um trecho de música<br>para encontrar o seu ritmo.</p><span class="empty-tag">SEUS ARQUIVOS. SUA CRIAÇÃO.</span></div>
-            <canvas id="image-canvas" hidden aria-label="Imagem do projeto. Ao selecionar área, arraste sobre a cabeça ou personagem."></canvas>
+            <canvas id="image-canvas" tabindex="0" aria-describedby="brush-instruction" hidden aria-label="Imagem do projeto. Ao selecionar área, arraste sobre a cabeça ou personagem."></canvas>
             <video id="preview-video" controls playsinline preload="metadata" hidden aria-label="Vídeo renderizado com áudio"></video>
             <div id="render-overlay" class="render-overlay" hidden role="status" aria-live="polite" aria-atomic="true"><span class="spinner" aria-hidden="true"></span><strong id="render-label">Preparando seu movimento…</strong><div id="render-progress-track" class="render-progress-track indeterminate" role="progressbar" aria-label="Progresso da operação" aria-valuemin="0" aria-valuemax="100"><span id="render-progress-fill"></span></div><span id="render-progress-detail">Processando…</span><span>O preview será o mesmo arquivo da exportação.</span></div>
           </div>

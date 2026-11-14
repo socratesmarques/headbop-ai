@@ -37,11 +37,12 @@ class VisibleMessages(HTMLParser):
     def handle_starttag(self, tag, attributes):
         attrs = dict(attributes)
         ignore = (tag in {'script', 'style'} or attrs.get('id') == 'language-select'
-                  or 'data-auth-text' in attrs)
+                  or 'data-auth-text' in attrs or 'data-i18n' in attrs)
         self.ignored.append((tag, ignore or (self.ignored[-1][1] if self.ignored else False)))
         if tag in {'meta', 'link', 'input', 'br', 'img'}:
             self.ignored.pop()
-        for name in ('aria-label', 'title', 'placeholder', 'alt', 'data-auth-text'):
+        for name in ('aria-label', 'title', 'placeholder', 'alt', 'data-auth-text',
+                     'data-i18n', 'data-i18n-aria'):
             if attrs.get(name):
                 self.messages.append(attrs[name])
 
@@ -64,7 +65,7 @@ def test_visible_html_messages_are_catalogued():
     parser.feed((ROOT / 'headbop/static/index.html').read_text())
     technical = {'headbop', 'AI', 'HEADBOP STUDIO', 'ϟ', 'BPM', 'Headbop 2.0',
                  '24 FPS', '30 FPS', '60 FPS', '720 · HD', '1080 · Full HD',
-                 'MP4', 'HEADBOP AI', 'OPEN SOURCE'}
+                 'MP4', 'HEADBOP AI', 'OPEN SOURCE', 'Headbop', 'GitHub', 'GitHub ↗'}
     known = set(CATALOGS['pt-BR']) | set(CATALOGS['pt-BR'].values()) | technical
     assert set(parser.messages) <= known
 
@@ -80,7 +81,7 @@ def test_dynamic_client_message_literals_are_catalogued():
 
 def test_backend_warnings_are_translatable():
     warnings = set()
-    for name in ('imaging', 'rigging', 'main'):
+    for name in ('imaging', 'rigging', 'main', 'painting'):
         tree = ast.parse((ROOT / f'headbop/{name}.py').read_text())
         for node in ast.walk(tree):
             if isinstance(node, ast.Dict):
@@ -107,7 +108,7 @@ def test_known_error_contract_is_present_in_every_catalog():
 
 def test_media_validation_instructions_are_translatable():
     messages = set()
-    for name in ('audio', 'formats', 'main', 'settings', 'imaging', 'rigging'):
+    for name in ('audio', 'formats', 'main', 'settings', 'imaging', 'rigging', 'painting'):
         tree = ast.parse((ROOT / f'headbop/{name}.py').read_text())
         for node in ast.walk(tree):
             if not isinstance(node, ast.Raise) or not isinstance(node.exc, ast.Call):

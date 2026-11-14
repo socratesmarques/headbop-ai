@@ -1,6 +1,7 @@
 """HTTP policy and bounded admission, independent of media processing."""
 
 import hmac
+import ipaddress
 import math
 import os
 import threading
@@ -12,6 +13,18 @@ from fastapi import HTTPException
 COOKIE = "headbop_session"
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "testserver"}
+
+
+def network_scope(peer: str) -> str:
+    """Group IPv6 privacy addresses by /64; never use a client-supplied header."""
+    try:
+        address = ipaddress.ip_address(peer)
+        if address.version == 6:
+            return str(ipaddress.ip_network(f"{address}/64", strict=False))
+        return str(address)
+    except ValueError:
+        # Local ASGI test transports have a symbolic peer instead of an IP.
+        return peer[:128]
 
 
 def fail(status, code, **params):

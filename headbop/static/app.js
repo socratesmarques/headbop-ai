@@ -3,7 +3,7 @@
 
 const $ = (id) => document.getElementById(id);
 const defaults = { fps: 24, resolution: 640, aspect: "source", speed: 1, easing: "natural", squash: 0.25 };
-const state = { project: null, busy: false, mode: "whole", motion: "auto", engine: "v2", selecting: false, selectionKind: "subject", rect: null, drag: null, image: null, mask: null, view: "source", videoURL: null, dirty: false, files: { image: null, audio: null } };
+const state = { project: null, busy: false, mode: "whole", motion: "auto", engine: "v2", selecting: false, selectionKind: "subject", rect: null, drag: null, image: null, mask: null, view: "source", videoURL: null, dirty: false, selectionRequired: false, files: { image: null, audio: null } };
 const imageCanvas = $("image-canvas");
 const imageContext = imageCanvas.getContext("2d");
 let renderToken = 0;
@@ -61,6 +61,11 @@ function handleError(error) {
   notice({ key, params: error.messageParams || {} }, true);
 }
 
+const brush = new window.HeadbopBrush({
+  canvas: imageCanvas, redraw: drawImage, changed: refreshControls,
+  limit: () => notice("brush.limit", true),
+});
+
 function renderButton(key, symbol) {
   const button = $("render-button");
   i18n.unbind(button);
@@ -81,20 +86,32 @@ function refreshControls() {
   $("animation-controls").disabled = state.busy || !hasProject;
   $("v2-controls").disabled = legacy;
   $("analyze-button").disabled = state.busy || !state.files.image || !state.files.audio;
-  $("render-button").disabled = state.busy || !hasProject || state.selecting || (state.mode === "subject" && !state.project.segmentation.available);
+  $("render-button").disabled = state.busy || !hasProject || state.selecting || state.selectionRequired || (state.mode === "subject" && !state.project.segmentation.available);
   $("clear-project").disabled = state.busy || !hasProject;
   $("import-button").disabled = state.busy;
   $("image-file").disabled = state.busy;
   $("audio-file").disabled = state.busy;
   $("select-region").disabled = state.busy || !state.image;
-  $("select-head").disabled = state.busy || !state.image || legacy;
+  $("select-head").hidden = !hasProject || !state.project.segmentation.available || state.selectionRequired || state.mode !== "subject";
+  $("select-head").disabled = state.busy || !state.image || legacy || brush.active;
+  $("head-help").hidden = $("select-head").hidden || legacy;
+  $("paint-region").disabled = state.busy || !state.image;
+  brush.setDisabled(state.busy);
+  for (const id of ["brush-add", "brush-erase", "brush-size", "brush-smart", "brush-cancel"]) $(id).disabled = state.busy;
+  $("brush-undo").disabled = state.busy || !brush.strokes.length;
+  $("brush-redo").disabled = state.busy || !brush.undone.length;
+  $("brush-clear").disabled = state.busy || (!brush.canApply && brush.base === "empty");
+  $("brush-apply").disabled = state.busy || !brush.canApply;
+  $("brush-add").setAttribute("aria-pressed", String(brush.mode === "add"));
+  $("brush-erase").setAttribute("aria-pressed", String(brush.mode === "erase"));
+  text("brush-status", brush.canApply ? "brush.status" : "brush.empty", { count: brush.strokes.length + (brush.current ? 1 : 0) });
   $("cancel-selection").disabled = state.busy;
   $("apply-selection").disabled = state.busy || !state.rect || state.rect[2] < 0.02 || state.rect[3] < 0.02;
   $("preview-tools").hidden = !hasProject;
   $("timeline-seek").disabled = state.busy || !state.videoURL || state.selecting;
   text("engine-note", legacy ? "Motor original: mantém o movimento e a saída dos projetos antigos. Selecione Headbop 2.0 para usar os novos ajustes." : "O modo Auto acompanha a energia e os ataques da música.");
   $("output-label").textContent = `${$("fps").value} FPS`;
-  setLinkEnabled($("download-project"), hasProject && !state.busy);
+  setLinkEnabled($("download-project"), hasProject && !state.busy && !brush.active && !state.selectionRequired);
   setLinkEnabled($("download-video"), Boolean(state.videoURL) && !state.busy);
   document.body.classList.toggle("busy", state.busy);
   document.querySelectorAll("[data-mode]").forEach((button) => {
@@ -293,7 +310,7 @@ function drawImage() {
       imageContext.stroke(); imageContext.beginPath(); imageContext.moveTo(x - radius * 1.5, y); imageContext.lineTo(x + radius * 1.5, y); imageContext.moveTo(x, y - radius * 1.5); imageContext.lineTo(x, y + radius * 1.5); imageContext.stroke();
     });
   }
-  if (state.selecting && state.rect) {
+  if (state.selecting && !brush.active && state.rect) {
     const [x, y, w, h] = state.rect;
     imageContext.fillStyle = "rgba(10, 15, 5, .53)";
     imageContext.beginPath(); imageContext.rect(0, 0, width, height); imageContext.rect(x * width, y * height, w * width, h * height); imageContext.fill("evenodd");
@@ -301,6 +318,7 @@ function drawImage() {
     imageContext.lineWidth = Math.max(2, width / 350);
     imageContext.strokeRect(x * width, y * height, w * width, h * height);
   }
+  brush.draw(imageContext);
 }
 
 function loadImage(url) {
@@ -345,7 +363,8 @@ async function loadProject(project) {
   state.image = null;
   state.mask = null;
   state.dirty = false;
-  cancelSelection();
+  state.selectionRequired = false;
+  cancelSelection(); brush.reset();
   $("engine").value = state.engine;
   $("bpm").value = Number(project.settings.bpm).toFixed(1).replace(/\.0$/, "");
   $("intensity").value = project.settings.intensity;
@@ -398,15 +417,28 @@ $("upload-form").addEventListener("submit", async (event) => {
   const body = new FormData(); body.append("image", state.files.image); body.append("audio", state.files.audio);
   notice(""); setBusy(true, "Encontrando o ritmo da sua música…");
   let created = false;
-  try { await loadProject(await request("/api/projects", { method: "POST", body, timeout: 120000 })); created = true; }
+  try {
+    await window.headbopAuth?.ensure?.();
+    await loadProject(await request("/api/projects", { method: "POST", body, timeout: 120000 })); created = true;
+  }
   catch (error) { handleError(error); }
   finally { setBusy(false); }
-  if (created) await renderProject();
+  if (created) {
+    // Analysis prepares media; choosing what moves is an explicit creative step.
+    state.selectionRequired = true; state.mode = "subject";
+    state.dirty = true; startBrush(false);
+    previewStatus("brush.ready"); text("render-hint", "brush.startHint");
+    notice("brush.startHint");
+  }
 });
 
 document.querySelectorAll("[data-mode]").forEach((button) => button.addEventListener("click", () => {
+  if (state.busy || !state.project) return;
   state.mode = button.dataset.mode;
-  cancelSelection(); dirty();
+  cancelSelection();
+  if (state.mode === "whole") { state.selectionRequired = false; notice("brush.whole"); }
+  else if (state.selectionRequired || !state.project.segmentation.available) startBrush(false);
+  dirty();
 }));
 document.querySelectorAll("[data-motion]").forEach((button) => button.addEventListener("click", () => { state.motion = button.dataset.motion; dirty(); }));
 document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => showView(button.dataset.view)));
@@ -441,7 +473,7 @@ function renderBudgetSeconds(result) {
 }
 
 async function renderProject() {
-  if (!state.project || state.busy || state.selecting) return;
+  if (!state.project || state.busy || state.selecting || state.selectionRequired) return;
   try { settings(); } catch (error) { handleError(error); return; }
   const token = ++renderToken;
   let deadline = Date.now() + 30000;
@@ -479,6 +511,7 @@ async function renderProject() {
 $("render-button").addEventListener("click", renderProject);
 
 function cancelSelection() {
+  brush.close(); $("brush-panel").hidden = true;
   state.selecting = false; state.rect = null; state.drag = null;
   imageCanvas.classList.remove("selecting"); $("selection-toolbar").hidden = true;
   drawImage(); refreshControls();
@@ -486,6 +519,7 @@ function cancelSelection() {
 
 function startSelection(kind) {
   if (!state.image || state.busy) return;
+  cancelSelection();
   state.selectionKind = kind;
   showView("source"); state.selecting = true; state.rect = null;
   imageCanvas.classList.add("selecting"); $("selection-toolbar").hidden = false;
@@ -504,17 +538,18 @@ function pointerPosition(event) {
   return [Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width)), Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height))];
 }
 imageCanvas.addEventListener("pointerdown", (event) => {
-  if (!state.selecting || state.busy) return;
+  if (!state.selecting || brush.active || state.busy) return;
   event.preventDefault(); state.drag = pointerPosition(event); state.rect = [state.drag[0], state.drag[1], 0, 0];
   imageCanvas.setPointerCapture(event.pointerId); drawImage();
 });
 imageCanvas.addEventListener("pointermove", (event) => {
-  if (!state.drag || !state.selecting || state.busy) return;
+  if (!state.drag || !state.selecting || brush.active || state.busy) return;
   event.preventDefault(); const point = pointerPosition(event);
   state.rect = [Math.min(state.drag[0], point[0]), Math.min(state.drag[1], point[1]), Math.abs(point[0] - state.drag[0]), Math.abs(point[1] - state.drag[1])];
   drawImage(); refreshControls();
 });
 function endPointer(event) {
+  if (brush.active) return;
   if (imageCanvas.hasPointerCapture(event.pointerId)) imageCanvas.releasePointerCapture(event.pointerId);
   state.drag = null; refreshControls();
 }
@@ -528,12 +563,59 @@ $("apply-selection").addEventListener("click", async () => {
   setBusy(true, head ? "Ajustando as camadas e os pivôs…" : "Separando o personagem do fundo…"); notice("");
   try {
     const project = await request(`/api/projects/${state.project.id}/${head ? "rig" : "segment"}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    state.project = project; cancelSelection(); dirty(); updateSummary(); await loadMask(project);
+    state.project = project; state.selectionRequired = false;
+    if (!head) state.mode = "subject";
+    cancelSelection(); dirty(); updateSummary(); await loadMask(project);
     if (head) { showView("rig"); notice(project.rig?.warning || "Cabeça marcada. Gere o preview para conferir o movimento."); }
     else notice(project.segmentation.available ? "Recorte aplicado. Gere o preview para conferir o resultado." : (project.segmentation.warning || "Não foi possível recortar. Tente uma seleção com mais contraste."), !project.segmentation.available);
   } catch (error) { handleError(error); }
   finally { setBusy(false); }
 });
+
+function startBrush(useExisting = true) {
+  if (!state.image || state.busy) return;
+  cancelSelection(); showView("source");
+  state.selecting = true; state.selectionKind = "paint"; state.rect = null;
+  $("brush-panel").hidden = false;
+  brush.smart = $("brush-smart").checked;
+  brush.radius = Number($("brush-size").value) / 100;
+  brush.open(useExisting && !state.selectionRequired ? state.mask : null);
+  text("preview-caption", "brush.title");
+  text("render-hint", "brush.startHint");
+  refreshControls(); drawImage();
+  $("stage").scrollIntoView({ behavior: "instant", block: "center" });
+  imageCanvas.focus({ preventScroll: true });
+}
+$("paint-region").addEventListener("click", () => startBrush(true));
+$("brush-add").addEventListener("click", () => brush.setMode("add"));
+$("brush-erase").addEventListener("click", () => brush.setMode("erase"));
+$("brush-undo").addEventListener("click", () => brush.undo());
+$("brush-redo").addEventListener("click", () => brush.redo());
+$("brush-clear").addEventListener("click", () => brush.clear());
+$("brush-size").addEventListener("input", () => {
+  brush.radius = Number($("brush-size").value) / 100;
+  $("brush-size-value").value = `${$("brush-size").value}%`; brush.schedule();
+});
+$("brush-smart").addEventListener("change", () => { brush.smart = $("brush-smart").checked; });
+$("brush-cancel").addEventListener("click", () => { cancelSelection(); showView(state.videoURL ? "video" : "source"); });
+$("brush-apply").addEventListener("click", async () => {
+  if (!state.project || state.busy || !brush.canApply) return;
+  const payload = brush.payload();
+  setBusy(true, "brush.applying"); notice("");
+  try {
+    const project = await request(`/api/projects/${state.project.id}/paint`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), timeout: 60000,
+    });
+    state.project = project; state.mode = "subject"; state.selectionRequired = false;
+    cancelSelection(); brush.reset(); dirty(); updateSummary(); await loadMask(project);
+    showView("mask"); notice("brush.applied");
+    window.headbopAuth?.refreshProjects();
+  } catch (error) { handleError(error); }
+  finally { setBusy(false); }
+});
+for (const node of document.querySelectorAll("#brush-panel [data-i18n], #paint-region[data-i18n]")) i18n.bindText(node, node.dataset.i18n);
+for (const node of document.querySelectorAll("#brush-panel [data-i18n-aria]")) i18n.bindAttribute(node, "aria-label", node.dataset.i18nAria);
+i18n.bindAttribute(imageCanvas, "aria-label", "brush.canvas");
 
 function seekTo(time) {
   if (!state.videoURL || state.busy || state.selecting) return;
@@ -556,7 +638,7 @@ $("import-file").addEventListener("change", async (event) => {
   if (file.size > 56 * 1024 * 1024) { notice("O projeto XML deve ter até 56 MiB.", true); return; }
   const body = new FormData(); body.append("file", file);
   setBusy(true, "Abrindo seu projeto…"); notice("");
-  try { await loadProject(await request("/api/import", { method: "POST", body, timeout: 120000 })); notice("Projeto Headbop importado. Gere o preview com os ajustes salvos."); }
+  try { await window.headbopAuth?.ensure?.(); await loadProject(await request("/api/import", { method: "POST", body, timeout: 120000 })); notice("Projeto Headbop importado. Gere o preview com os ajustes salvos."); }
   catch (error) { handleError(error); }
   finally { setBusy(false); }
 });
@@ -564,6 +646,7 @@ $("import-file").addEventListener("change", async (event) => {
 $("download-project").addEventListener("click", async (event) => {
   event.preventDefault();
   if (!state.project || state.busy) return;
+  if (brush.active || state.selectionRequired) { notice("brush.pending", true); return; }
   try { settings(); } catch (error) { handleError(error); return; }
   setBusy(true, "Salvando imagem, áudio e movimento…"); notice("");
   try {
@@ -586,7 +669,8 @@ $("clear-project").addEventListener("click", async () => {
     await request(`/api/projects/${state.project.id}`, { method: "DELETE" });
     window.headbopAuth?.refreshProjects();
     renderToken += 1; imageToken += 1;
-    state.project = null; state.image = null; state.mask = null; state.files = { image: null, audio: null }; state.dirty = false;
+    state.project = null; state.image = null; state.mask = null; state.files = { image: null, audio: null }; state.dirty = false; state.selectionRequired = false;
+    brush.reset();
     state.mode = "whole"; state.motion = "auto"; state.engine = "v2";
     $("engine").value = "v2";
     for (const [name, value] of Object.entries(defaults)) $(name).value = value;

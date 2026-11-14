@@ -9,20 +9,25 @@ essa branch.
 
 ## Fluxo de uso
 
-1. Selecione uma imagem PNG/JPEG/WebP e um áudio de 0,5 a 30 segundos.
-2. Clique em **Analisar e criar**. O aplicativo estima o ritmo, prepara o recorte
-   quando confiável e gera o primeiro vídeo automaticamente.
-3. Reproduza o vídeo. A timeline mostra batidas, onsets, energia e posição de
-   reprodução; clique nela ou use o controle de tempo para navegar.
-4. Opcionalmente ajuste o preset, BPM ou intensidade. Inspecione a máscara e os
-   pivôs; selecione o personagem inteiro e depois a cabeça para articular o rig.
-5. Gere novamente e baixe **MP4** ou salve o projeto **XML Headbop**.
+1. Na home, clique em **Criar meu vídeo**. Não é necessário cadastro ou login.
+2. Envie uma imagem PNG/JPEG/WebP e um áudio de 0,5 a 30 segundos. Clique em
+   **Analisar e criar**: a análise encontra a batida e abre o editor, sem gerar vídeo.
+3. **Pinte a área animada** por dentro da parte que deve se mover. O pincel
+   inteligente reconhece bordas ao aplicar; use **Apagar**, **Desfazer/Refazer** e
+   ajuste o tamanho para refinar. Desative **Reconhecer bordas** para pintura exata.
+4. Clique em **Aplicar seleção** e confira a máscara. As partes selecionadas se
+   movem juntas; o restante compõe o fundo. **Imagem inteira** continua opcional.
+5. Ajuste o movimento e clique em **Gerar preview**. Confira o vídeo com áudio,
+   baixe o **MP4** ou salve o projeto **XML Headbop**.
 
-O modo automático usa o recorte apenas quando há evidência suficiente. Rostos
-frontais, PNGs transparentes e personagens sobre fundos uniformes têm caminhos
-específicos; imagens ambíguas mantêm a opção de mover a imagem inteira. Cabeça e
-corpo só são separados quando há evidência facial ou seleção manual, sem presumir
-anatomia de qualquer desenho. Consulte [limitações](docs/LIMITATIONS.md).
+**Pintar área animada** escolhe os pixels que se movem. **Articular cabeça
+(opcional)** separa a cabeça dentro de um personagem já selecionado e define seu
+pivô de giro; não substitui a pintura. O recorte por retângulo continua disponível
+como ferramenta alternativa. Não é preciso marcar uma cabeça para animar a pintura.
+
+A home inclui apresentação do projeto e [link para o repositório](https://github.com/socratesmarques/headbop-ai).
+O espaço de criação é privado por navegador e temporário. Salve o XML antes de
+expirar a sessão ou limpar os cookies; ele permite continuar em outro dispositivo.
 
 ## Presets e controles
 
@@ -65,7 +70,6 @@ python -m pip install -r requirements.lock
 python -m pip install --no-deps -e .
 export HEADBOP_ENV=development
 export HEADBOP_PUBLIC_ORIGIN=http://127.0.0.1:8000
-python -m headbop.manage users create alice
 uvicorn headbop.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
@@ -88,12 +92,11 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --no-deps -e .
 $env:HEADBOP_ENV="development"
 $env:HEADBOP_PUBLIC_ORIGIN="http://127.0.0.1:8000"
-.\.venv\Scripts\python.exe -m headbop.manage users create alice
 .\.venv\Scripts\python.exe -m uvicorn headbop.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
 As instruções Windows são documentadas, mas esta entrega foi executada em Linux.
-Abra o endereço local informado pelo Uvicorn e entre com a conta criada. Para
+Abra o endereço local informado pelo Uvicorn e clique em **Criar meu vídeo**. Para
 acesso por outros dispositivos, configure a origem HTTPS conforme o guia de
 implantação. Safari/iPhone físico ainda requer validação própria.
 
@@ -104,11 +107,10 @@ docker build -t headbop-ai .
 docker run -d --name headbop -p 127.0.0.1:8000:8000 -v headbop_data:/data \
   -e HEADBOP_DATA_DIR=/data -e HEADBOP_ENV=development \
   -e HEADBOP_PUBLIC_ORIGIN=http://127.0.0.1:8000 headbop-ai
-docker exec -it headbop python -m headbop.manage users create alice
 ```
 
 O contêiner usa usuário sem privilégios e inclui FFmpeg. O volume preserva
-contas e projetos entre reinícios; os projetos expiram conforme o TTL. Em ambiente com proxy TLS, o Dockerfile aceita um certificado confiável
+sessões e projetos entre reinícios; os projetos expiram conforme o TTL. Em ambiente com proxy TLS, o Dockerfile aceita um certificado confiável
 via BuildKit: `--secret id=proxy_ca,src=/caminho/ca-bundle.pem`; a verificação TLS
 permanece habilitada e o certificado não é incorporado à imagem.
 
@@ -118,8 +120,9 @@ permanece habilitada e o certificado não é incorporado à imagem.
   antigo não o migra. A troca para o motor 2.0 é explícita.
 - Projetos **v2** armazenam os controles novos, os keyframes por camada, a seleção
   da cabeça e o recorte. A importação restaura a timeline em vez de recalculá-la.
-- A exportação do motor original continua produzindo XML v1. O motor 2.0 produz
-  XML v2; versões antigas do aplicativo não conseguem abrir esse formato novo.
+- A exportação do motor original continua produzindo XML v1. Se você pintar uma
+  seleção nesse motor, o XML passa a v2 para guardar a máscara, mantendo o motor
+  original e seus parâmetros. O motor 2.0 também produz XML v2.
 - O MP4 continua independente do XML. Preserve o MP4 para uma cópia visual final.
 
 ## Testes e exemplos reproduzíveis
@@ -131,6 +134,7 @@ ruff check .
 python -m playwright install chromium
 python scripts/browser_smoke.py
 python scripts/i18n_browser_test.py
+python scripts/brush_browser_test.py
 python scripts/render_comparison.py --help
 ```
 
@@ -167,10 +171,11 @@ restante. O indicador chega a 100% somente com vídeo finalizado.
 
 ## Publicação
 
-Consulte [o guia de implantação com contas individuais](docs/PRODUCTION.md) e o
-[registro de validação das correções da PR #3](docs/PR3_FIXES_VALIDATION.md).
-A aplicação exige autenticação, isola projetos por proprietário e aplica cotas
-por usuário e limites de requisições. A implantação suporta uma única instância;
+Consulte [o guia de implantação pública](docs/PRODUCTION.md) e o
+[registro da home e do pincel](docs/PUBLIC_STUDIO_VALIDATION.md).
+O uso é livre, sem contas provisionadas pelo administrador. Sessões automáticas
+isolam os projetos e preservam as proteções de origem/CSRF. Cotas e limites por
+navegador e rede impedem que limpar cookies reinicie o orçamento de uso. A implantação suporta uma única instância;
 DNS/HTTPS público, carga real, backup e operação precisam ser validados no host final.
 
 ## Configuração e privacidade
@@ -190,9 +195,9 @@ DNS/HTTPS público, carga real, backup e operação precisam ser validados no ho
 
 Veja [.env.example](.env.example). As variáveis devem ser exportadas no processo;
 `.env` não é carregado automaticamente. Use **um único worker**, porque a fila é
-local. `/api/health` é público; `/openapi.json` exige autenticação. Crie, redefina
-ou desative contas com `python -m headbop.manage users --help`. Projetos legados
-sem proprietário requerem atribuição explícita; consulte o guia de migração.
+local. `/api/health` é público; a API de projetos e `/openapi.json` exigem a sessão
+criada automaticamente ao abrir o estúdio. Não configure contas para liberar o uso.
+Projetos antigos podem ser importados por XML; veja o guia de migração.
 
 Cada mídia enviada tem limite de 20 MiB; imagens até 16 megapixels são normalizadas
 para até 1600 pixels de lado. XML tem limite de 56 MiB. Processamento e armazenamento
@@ -200,7 +205,7 @@ acontecem no servidor local, sem envio da mídia a serviços de IA. A limpeza oc
 periodicamente; também é possível excluir a sessão. O XML incorpora as mídias:
 compartilhá-lo compartilha seu conteúdo.
 
-Contas e projetos são isolados por usuário. A configuração de produção exige
+Projetos são isolados por sessão do navegador. A configuração de produção exige
 HTTPS e aplica limites de recursos e de requisições. Arquivos temporários não têm
 backup automático. Mais detalhes em [arquitetura](docs/ARCHITECTURE.md),
 [limitações](docs/LIMITATIONS.md) e [histórico do plano da evolução](docs/ENGINE_V2_PLAN.md).

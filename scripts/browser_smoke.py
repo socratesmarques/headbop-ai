@@ -111,16 +111,30 @@ def wait_server(base_url: str, server: subprocess.Popen, logfile: Path):
     raise RuntimeError(f"Server did not start: {logfile.read_text()}")
 
 
-def login(page, username="smoke-user"):
-    expect(page.locator("#auth-panel")).to_be_visible()
-    page.locator("#login-username").fill(username)
-    page.locator("#login-password").fill("Smoke-test-password-42")
-    page.locator("#login-button").click()
+def enter_studio(page):
+    expect(page.locator("#home")).to_be_visible()
+    assert page.locator('input[type="password"]').count() == 0
+    page.locator("#start-creating").click()
     expect(page.locator("#studio")).to_be_visible(timeout=15000)
 
 
+def paint_head(page, *, touch_context=None):
+    from brush_browser_test import draw_stroke
+    expect(page.locator("#brush-panel")).to_be_visible()
+    expect(page.locator("#render-button")).to_be_disabled()
+    expect(page.locator("#brush-smart")).to_be_checked()
+    draw_stroke(page, (.5, .27), (.5, .43), touch=touch_context)
+    with page.expect_response(lambda response: response.url.endswith("/paint") and response.request.method == "POST") as response:
+        page.locator("#brush-apply").click()
+    assert response.value.ok, response.value.text()
+    assert response.value.json()["segmentation"]["method"] == "smart-brush"
+    expect(page.locator("#brush-panel")).to_be_hidden()
+    expect(page.locator("#head-help")).to_be_visible()
+    expect(page.locator("#render-button")).to_be_enabled()
+
+
 def no_overflow(page):
-    assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), (
+    assert page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth"), (
         "Horizontal overflow"
     )
 
@@ -196,12 +210,21 @@ def select_rectangle(page, trigger, rect, *, touch_context=None):
     canvas = page.locator("#image-canvas")
     expect(canvas).to_be_visible()
     canvas.scroll_into_view_if_needed()
-    box = canvas.bounding_box()
+    # Use DOM layout coordinates, as in the brush test, before converting CDP
+    # touch points to the visual viewport. Playwright bounding_box already
+    # includes a mobile visual viewport offset and must not be adjusted twice.
+    box = canvas.evaluate("canvas => canvas.getBoundingClientRect().toJSON()")
     assert box
     x, y, width, height = rect
     x0, y0 = box["x"] + box["width"] * x, box["y"] + box["height"] * y
     x1, y1 = x0 + box["width"] * width, y0 + box["height"] * height
     if touch_context:
+        # CDP takes visual-viewport coordinates; DOM boxes use the layout viewport.
+        viewport = page.evaluate("({x:visualViewport?.offsetLeft || 0,y:visualViewport?.offsetTop || 0})")
+        x0 -= viewport["x"]
+        x1 -= viewport["x"]
+        y0 -= viewport["y"]
+        y1 -= viewport["y"]
         touch = touch_context.new_cdp_session(page)
         touch.send("Input.dispatchTouchEvent", {
             "type": "touchStart", "touchPoints": [{"x": x0, "y": y0}]
@@ -230,9 +253,9 @@ def select_rectangle(page, trigger, rect, *, touch_context=None):
     expect(page.locator("#render-button")).to_be_enabled()
     expect(page.locator("#download-video")).to_have_attribute("aria-disabled", "true")
     data = response.value.json()
-    if endpoint == "/rig":
-        for actual, expected in zip(data["rig"]["head_rect"], rect, strict=True):
-            assert abs(actual - expected) < 0.015, data["rig"]
+    actual_rect = data["rig"]["head_rect"] if endpoint == "/rig" else data["segmentation"]["rect"]
+    for actual, expected in zip(actual_rect, rect, strict=True):
+        assert abs(actual - expected) < 0.015, actual_rect
     return data
 
 
@@ -258,8 +281,6 @@ def main():
         environment["HEADBOP_PUBLIC_ORIGIN"] = base_url
         from headbop.auth import AuthStore
         accounts = AuthStore(directory / "projects" / "security.sqlite3")
-        accounts.create_user("smoke-user", "Smoke-test-password-42")
-        accounts.create_user("second-user", "Smoke-test-password-42")
         environment["OPENBLAS_NUM_THREADS"] = "1"
         environment["OMP_NUM_THREADS"] = "1"
         logfile = RESULTS / "browser-server.log"
@@ -285,7 +306,9 @@ def main():
                     mobile = None
                     try:
                         page.goto(base_url)
-                        login(page)
+                        no_overflow(page)
+                        page.screenshot(path=str(RESULTS / "home-desktop.png"), full_page=True)
+                        enter_studio(page)
                         # Localized UI, persistence, and reversible language switching.
                         page.locator("#language-select").select_option("en")
                         expect(page.locator("#source-title")).to_contain_text("Your files")
@@ -304,7 +327,9 @@ def main():
                         page.locator("#image-file").set_input_files(image)
                         page.locator("#audio-file").set_input_files(audio)
                         page.locator("#analyze-button").click()
-                        ready(page, generate=False)  # New uploads render without another click.
+                        paint_head(page)  # Analysis stops for explicit movement selection.
+                        page.screenshot(path=str(RESULTS / "desktop-painted.png"), full_page=True)
+                        ready(page)
                         expect(page.locator('[data-motion="auto"]')).to_have_attribute(
                             "aria-pressed", "true"
                         )
@@ -376,7 +401,9 @@ def main():
                         mobile_page = mobile.new_page()
                         watch_errors(mobile_page, errors)
                         mobile_page.goto(base_url)
-                        login(mobile_page)
+                        no_overflow(mobile_page)
+                        mobile_page.screenshot(path=str(RESULTS / "home-mobile.png"), full_page=True)
+                        enter_studio(mobile_page)
                         no_overflow(mobile_page)
                         mobile_page.screenshot(path=str(RESULTS / "mobile-empty.png"), full_page=True)
                         import_project(mobile_page, xml_path)
@@ -412,28 +439,33 @@ def main():
                         page.locator("#open-project-button").click()
                         ready(page, generate=False)
                         assert project_data(page)["id"] == initial["id"]
-                        # Logout/login must clear canvases, controls, media and account state.
-                        page.locator("#logout-button").click()
-                        expect(page.locator("#auth-panel")).to_be_visible()
+                        # A new browser identity never inherits the previous visitor's media.
+                        old_guest = page.request.get("/api/auth/session").json()["user"]["id"]
+                        page.context.clear_cookies()
+                        page.goto(base_url)
+                        expect(page.locator("#home")).to_be_visible()
                         expect(page.locator("#studio")).to_be_hidden()
                         assert page.request.get(f'/api/projects/{initial["id"]}/image').status == 401
-                        login(page, "second-user")
+                        enter_studio(page)
                         expect(page.locator("#project-history")).to_be_disabled()
                         expect(page.locator("#stage-empty")).to_be_visible()
                         assert not page.locator("#preview-video").get_attribute("src")
+                        new_guest = page.request.get("/api/auth/session").json()["user"]["id"]
+                        assert new_guest != old_guest
                         for suffix in ("", "/image", "/foreground", "/video", "/export", "/render"):
                             assert page.request.get(f'/api/projects/{initial["id"]}{suffix}').status == 404
-                        # Revocation by the administrator is observed on the next request.
-                        accounts.revoke_user_sessions(accounts.get_user("second-user")["id"])
+                        # Expired or revoked sessions return to the home without stale project data.
+                        accounts.revoke_user_sessions(new_guest)
                         page.evaluate("() => window.headbopAuth.refreshProjects()")
-                        expect(page.locator("#auth-panel")).to_be_visible()
+                        expect(page.locator("#home")).to_be_visible()
+                        expect(page.locator("#home-notice")).to_contain_text("expirou")
                         expect(page.locator("#studio")).to_be_hidden()
                         assert not errors, errors
                         print(
-                            "PASS: auto v2 preview, energy/onsets, mask/rig views, engine and advanced settings, "
+                            "PASS: public home, no-signup workspace, smart painted selection then v2 preview, energy/onsets, mask/rig views, engine and advanced settings, "
                             "manual crop/head, timeline seek, 720p/30fps vertical MP4 with audio and identical "
                             "download, XML v2 frame/rig roundtrip, legacy XML v1 import/render/export, mobile "
-                            "layout/touch crop/head/render/delete, session persistence, account history, logout, cross-account denial and revocation; no JS/CSP errors"
+                            "layout/touch crop/head/render/delete, session persistence, guest history, cross-browser denial and revocation; no JS/CSP errors"
                         )
                     except Exception as error:
                         diagnostic = page.evaluate("""() => {

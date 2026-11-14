@@ -25,7 +25,8 @@ V1_TRANSFORM = {"x", "y", "rotation", "scale"}
 V2_TRANSFORM = V1_TRANSFORM | {"scale_x", "scale_y"}
 RECT_ATTRIBUTES = ("x", "y", "width", "height")
 SEGMENTATION_METHODS = {
-    "alpha", "uniform-background", "face-grabcut", "manual-grabcut", "unavailable", "none"
+    "alpha", "uniform-background", "face-grabcut", "manual-grabcut", "unavailable", "none",
+    "smart-brush", "manual-brush",
 }
 SEGMENTATION_ATTRIBUTES = {"method", "kind", "confidence"}
 

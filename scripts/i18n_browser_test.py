@@ -63,8 +63,8 @@ class Handler(SimpleHTTPRequestHandler):
 
 def api(route):
     path = urlsplit(route.request.url).path
-    if path == '/api/auth/session':
-        body = {'user': {'id': 'b' * 32, 'username': 'browser-test'}, 'csrf': 'test-csrf',
+    if path in {'/api/auth/session', '/api/auth/guest'}:
+        body = {'user': {'id': 'b' * 32, 'username': 'browser-test', 'guest': True}, 'csrf': 'test-csrf',
                 'expires_at': time.time() + 3600}
     elif path == '/api/projects':
         body = {'projects': []}
@@ -81,7 +81,7 @@ def translate(page, language):
 
 
 def overflow(page):
-    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+    assert page.evaluate('document.documentElement.scrollWidth <= document.documentElement.clientWidth')
 
 
 def check_bindings(page, language):
@@ -105,7 +105,7 @@ def check_bindings(page, language):
         expected['error.rate_limited'].replace('{seconds}', '7')
     )
     expect(page.locator('#account-user')).to_have_text(
-        expected['auth.signedInAs'].replace('{name}', 'browser-test')
+        expected['guest.workspace']
     )
     # Percent descriptions must rebind just like the indeterminate description.
     page.evaluate('updateProgress(37)')
@@ -223,11 +223,12 @@ def security_and_error_bindings(page):
       try { await request('/api/projects'); } catch (_) {} finally { window.fetch = original; }
     }''')
     expect(page.locator('#studio')).to_be_hidden()
-    expect(page.locator('#auth-panel')).to_be_visible()
+    expect(page.locator('#home')).to_be_visible()
     for language in LANGUAGES:
         translate(page, language)
-        expect(page.locator('#auth-notice')).to_have_text(CATALOGS[language]['auth.sessionExpired'])
-        expect(page.locator('#login-button')).to_have_text(CATALOGS[language]['auth.signIn'])
+        expect(page.locator('#home-notice')).to_have_text(CATALOGS[language]['guest.expired'])
+        expect(page.locator('#start-creating')).to_contain_text(CATALOGS[language]['home.create'])
+        expect(page.locator('#login-form')).to_have_count(0)
         overflow(page)
 
 
@@ -250,15 +251,50 @@ def main():
                     page = context.new_page()
                     errors = []
                     page.on('pageerror', lambda error: errors.append(str(error)))
+                    requests = []
+                    page.on('request', lambda request: requests.append(request.url))
                     page.goto(f'http://127.0.0.1:{server.server_port}/')
+                    expect(page.locator('#home')).to_be_visible()
+                    expect(page.locator('#studio')).to_be_hidden()
+                    expect(page.locator('#login-form')).to_have_count(0)
+                    for language in LANGUAGES:
+                        translate(page, language)
+                        page.reload()
+                        expect(page.locator('#language-select')).to_have_value(language)
+                        expect(page.locator('#home')).to_be_visible()
+                        for key in ('home.title1', 'home.title2', 'home.title3', 'home.description',
+                                    'home.howTitle', 'home.step2Text', 'home.openTitle'):
+                            expect(page.locator(f'[data-i18n="{key}"]')).to_have_text(CATALOGS[language][key])
+                        expect(page.locator('.demo-character')).to_have_attribute(
+                            'aria-label', CATALOGS[language]['home.demoLabel'])
+                        links = page.locator('#home a[href="https://github.com/socratesmarques/headbop-ai"]')
+                        assert links.count() >= 2
+                        for link in links.all():
+                            expect(link).to_have_attribute('rel', 'noopener noreferrer')
+                        overflow(page)
+                    assert not any(urlsplit(url).path == '/api/auth/guest' for url in requests), requests
+                    page.locator('#start-creating').click()
                     expect(page.locator('#studio')).to_be_visible()
+                    expect(page.locator('#home')).to_be_hidden()
+                    assert any(urlsplit(url).path == '/api/auth/guest' for url in requests), requests
                     for language in LANGUAGES:
                         translate(page, language)
                         page.reload()
                         expect(page.locator('#language-select')).to_have_value(language)
                         expect(page.locator('#studio')).to_be_visible()
+                        expect(page.locator('#account-user')).to_have_text(CATALOGS[language]['guest.workspace'])
                         overflow(page)
                     page.evaluate('(project) => loadProject(project)', PROJECT)
+                    page.evaluate('startBrush(true)')
+                    for language in LANGUAGES:
+                        translate(page, language)
+                        expect(page.locator('#brush-panel')).to_be_visible()
+                        for key in ('brush.title', 'brush.instructions', 'brush.add', 'brush.erase',
+                                    'brush.smart', 'brush.keyboard', 'brush.apply'):
+                            expect(page.locator(f'#brush-panel [data-i18n="{key}"]')).to_have_text(CATALOGS[language][key])
+                        expect(page.locator('#image-canvas')).to_have_attribute('aria-label', CATALOGS[language]['brush.canvas'])
+                        overflow(page)
+                    page.evaluate('cancelSelection()')
                     page.evaluate('''() => {
                       chooseFile('image', new File(['x'], 'Gerar preview'));
                       startSelection('head'); setBusy(true, 'Na fila de renderização…');
@@ -289,7 +325,7 @@ def main():
                     security_and_error_bindings(page)
                     assert not errors, errors
                     context.close()
-                print('PASS: 8 locales × desktop/390px/320px; persistence; dynamic instructions, warnings, '
+                print('PASS: home-first and free guest entry; GitHub links; 8 locales × desktop/390px/320px; home/brush translations and persistence; dynamic instructions, warnings, '
                       'summary, progress ARIA; filenames preserved; 100 switches settle; fetch/body deadlines '
                       'and render POST failure release busy state; queued jobs use a fixed server budget; '
                       'CSRF, expired-session UI and error bindings; no JS errors.')

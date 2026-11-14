@@ -52,9 +52,19 @@ As instruções Windows/Kali não equivalem a testes executados nesses sistemas;
 consulte o relatório. Tela/toque móveis são exercitados em Chromium emulado;
 iPhone/Safari físico não foi validado.
 
-Projetos são temporários e pertencem à conta que os criou. Contas são provisionadas
-pelo administrador; não há cadastro aberto, recuperação por e-mail ou backup
-automático. O processo deve ter um worker, imposto por trava no diretório de dados;
-não há fila distribuída. Renderizações interrompidas são marcadas como erro e podem
-ser solicitadas novamente. Consulte o [guia de produção](PRODUCTION.md) e o
-[registro de validação](PR3_FIXES_VALIDATION.md) para limites e verificações externas.
+Projetos são temporários e pertencem a uma sessão privada criada automaticamente
+para o navegador. Não há cadastro, exigência de login ou backup automático. A sessão
+dura até 12 horas; projetos têm TTL de 24 horas por padrão. Limpar cookies ou expirar
+a sessão remove o acesso pelo navegador; salve o XML para continuar depois.
+A cota de rede é compartilhada por visitantes no mesmo IP (ou /64 IPv6), de forma
+que limpar cookies não contorna os limites. Redes compartilhadas podem atingir a
+cota mesmo usando navegadores diferentes.
+
+O pincel usa segmentação por cor/bordas guiada pelos traços, com processamento
+limitado a 640 pixels no maior lado. Ele não reconhece semanticamente qualquer
+objeto e pode precisar da borracha ou do modo manual em imagens ambíguas. Áreas
+pintadas desconectadas se movem juntas, sem timelines independentes por parte.
+
+O processo deve ter um worker, imposto por trava no diretório de dados; não há fila
+distribuída. Renderizações interrompidas podem ser solicitadas novamente. Consulte
+[PRODUCTION.md](PRODUCTION.md) e [PUBLIC_STUDIO_VALIDATION.md](PUBLIC_STUDIO_VALIDATION.md).

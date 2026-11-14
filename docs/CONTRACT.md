@@ -4,13 +4,24 @@ Historical v1 contract. For the current v2 extensions and compatibility rules, s
 [ENGINE_V2_PLAN.md](ENGINE_V2_PLAN.md) and [ARCHITECTURE.md](ARCHITECTURE.md).
 
 Current security additions supersede the historical unauthenticated examples:
-individual login at `POST /api/auth/login`, session/CSRF at `GET /api/auth/session`,
-logout at `POST /api/auth/logout`, and owned history at `GET /api/projects`.
+`POST /api/auth/guest` creates or reuses a private browser session without signup
+or credentials (same-origin required); `GET /api/auth/session` returns session/CSRF,
+`POST /api/auth/logout` revokes it, and `GET /api/projects` lists owned history.
+The earlier named-account login API remains available for compatibility.
 Every project/media route requires the session cookie; writes also require the
 configured `Origin` and `X-CSRF-Token`. Errors use `{code, params, detail?}`; known
 media validation details are translated by the client. Render POST/GET return
 `progress` and `timeout_seconds`, a finite budget including the bounded queue.
 XML v1 and v2 are both accepted; ownership is always assigned by the server.
+
+`POST /api/projects/{id}/paint` accepts `{strokes, smart, base}`. Each stroke has
+normalized `points: [[x,y], ...]`, `radius` relative to the shorter image side and
+`mode: "add" | "erase"`. `base: "empty" | "current"` starts fresh or refines the
+saved mask. Limits: 256 KiB JSON, 100 strokes, 1,000 points per stroke and 5,000
+total. A successful response returns the updated project in subject mode and
+invalidates old video; errors preserve the previous mask, rig and video. Analysis
+opens the brush in the UI; rendering requires an explicit user action. Painted
+projects use XML v2 to preserve their mask, even with the legacy rendering engine.
 
 Python package `headbop`. UI is vanilla HTML/CSS/JS served at `/`, Portuguese copy.
 No services besides FastAPI and FFmpeg. API errors JSON `{detail: string}`.
