@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import threading
+import tempfile
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -25,9 +26,11 @@ from .animation import generate_keyframes, generate_motion
 from .audio import analyze_audio
 from .formats import export_project, import_project
 from .imaging import segment_image
+from .painting import PaintSelection, paint_selection
 from .auth import AuthBusyError, AuthStore, InvalidCredentialsError, normalize_username
 from .jobs import run_render_job
-from .security import (Admission, COOKIE, SAFE_METHODS, SecurityConfig, check_csrf, fail)
+from .security import (Admission, COOKIE, SAFE_METHODS, SecurityConfig, check_csrf, fail,
+                       network_scope)
 from .rigging import build_rig
 from .settings import Settings, effective_settings
 from .store import MIB, QuotaError, Store
@@ -139,7 +142,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     def cleanup_loop():
         while not stop.wait(300):
             store.cleanup()
-            auth.cleanup()
+            auth.cleanup(store.owner_ids())
 
     @asynccontextmanager
     async def lifespan(_app):
@@ -150,6 +153,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="headbop-render")
             stop = threading.Event()
             store.cleanup()
+            auth.cleanup(store.owner_ids())
             cleaner = threading.Thread(target=cleanup_loop, daemon=True)
             cleaner.start()
             try:
@@ -172,6 +176,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             return MAX_XML
         if path == "/api/projects":
             return 2 * MAX_UPLOAD + 65536
+        if path.endswith("/paint"):
+            return 256 * 1024
         return 65536
 
     class BodyLimit:
@@ -208,7 +214,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         if not (path.startswith("/api/") or path == "/openapi.json") or path == "/api/health":
             return
         config.request_origin(request)
-        peer = request.client.host if request.client else "unknown"
+        peer = network_scope(request.client.host if request.client else "unknown")
+        request.state.peer = peer
         # Only the ASGI server's explicitly trusted proxy can supply client IPs.
         # Raw X-Forwarded-For never participates in identity/rate calculations.
         consume("api-global", 3000, 60)
@@ -218,6 +225,13 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         if path == "/api/auth/login" and request.method == "POST":
             consume("login-global", 60, 60)
             consume("login-ip:" + peer, 10, 600)
+        elif path == "/api/auth/guest" and request.method == "POST":
+            # Existing browsers keep their workspace and do not consume the
+            # creation quota on refresh, navigation or a second tab.
+            request.state.session = auth.get_session(request.cookies.get(COOKIE))
+            if request.state.session is None:
+                consume("guest-global", 100, 300)
+                consume("guest-ip:" + peer, 10, 3600)
         else:
             session = auth.get_session(request.cookies.get(COOKIE))
             if session is None:
@@ -243,15 +257,26 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             except ValueError:
                 fail(413, "upload_too_large")
         creating = request.method == "POST" and path in {"/api/projects", "/api/import"}
-        editing = request.method in {"POST", "PUT"} and path.endswith(("/segment", "/rig", "/settings"))
+        editing = request.method in {"POST", "PUT"} and path.endswith(("/segment", "/rig", "/settings", "/paint"))
         if creating or editing:
             user_id = request.state.user["id"]
             consume("analysis-user:" + user_id, 60, 3600)
-            admission.enter(user_id)
-            request.state.admitted = user_id
+            guest_scope = auth.guest_scope(user_id)
+            admission_key = "guest:" + guest_scope if guest_scope else user_id
+            if guest_scope:
+                consume("analysis-guest:" + guest_scope, 60, 3600)
+                consume("analysis-ip:" + peer, 60, 3600)
+            admission.enter(admission_key)
+            request.state.admitted = admission_key
             try:
-                request.state.reservation = store.reserve(user_id, 128 * MIB if creating else 32 * MIB,
-                                                          projects=1 if creating else 0)
+                reserved_size = 128 * MIB if creating else (64 if path.endswith("/paint") else 32) * MIB
+                with store.lock:
+                    # A new browser may have consumed the shared budget before
+                    # admission. Resolve owners atomically with the reservation.
+                    quota_owners = auth.guest_owners(user_id)
+                    request.state.reservation = store.reserve(user_id, reserved_size,
+                                                              projects=1 if creating else 0,
+                                                              quota_owners=quota_owners)
             except QuotaError as exc:
                 fail(429, exc.code, seconds=60)
 
@@ -321,6 +346,16 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     @app.get("/api/auth/session")
     def session(request: Request):
         return request.state.session
+
+    @app.post("/api/auth/guest")
+    def guest_workspace(request: Request):
+        if request.state.session is not None:
+            return request.state.session
+        session = auth.create_guest(request.state.peer)
+        response = JSONResponse({key: session[key] for key in ("user", "csrf", "expires_at")})
+        response.set_cookie(COOKIE, session["token"], max_age=int(auth.session_ttl_seconds),
+                            httponly=True, secure=config.secure_cookie, samesite="strict", path="/")
+        return response
 
     @app.post("/api/auth/logout", status_code=204)
     def logout(request: Request):
@@ -472,6 +507,48 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             store.write(project)
             return public(project)
 
+    @app.post("/api/projects/{project_id}/paint")
+    def paint(project_id: str, selection: PaintSelection):
+        with store.lock:
+            ensure_idle(project_id)
+            project = store.read(project_id)
+            path = store.path(project_id)
+            # Prepare every dependent asset before replacing any visible file.
+            # Backups are hard links on this same filesystem, so preserving a
+            # previous large video does not consume another video's quota.
+            with tempfile.TemporaryDirectory(prefix=".paint-", dir=path) as temporary:
+                staged = Path(temporary)
+                project["segmentation"] = paint_selection(
+                    path / "image.png", staged / "foreground.png", selection,
+                    path / "foreground.png" if project["segmentation"]["available"] else None)
+                project["foreground_url"] = f"/api/projects/{project_id}/foreground"
+                project["settings"] = {**effective_settings(project["settings"]), "mode": "subject"}
+                project["rig"] = build_rig(path / "image.png", staged / "foreground.png",
+                                           staged, project["segmentation"])
+                project["keyframes"] = frames_for(project)
+                project["render"] = {"status": "idle", "video_url": None, "error": None}
+                assets = ["foreground.png", *project["rig"]["layers"].values()]
+                names = [*assets, "project.json", "video.mp4"]
+                backups = staged / "backups"
+                backups.mkdir()
+                for name in names:
+                    if (path / name).is_file():
+                        os.link(path / name, backups / name)
+                try:
+                    for name in assets:
+                        (staged / name).replace(path / name)
+                    store.write(project)
+                    reset_render(project)
+                except Exception:
+                    for name in names:
+                        if (backups / name).is_file():
+                            (backups / name).replace(path / name)
+                        else:
+                            (path / name).unlink(missing_ok=True)
+                    (path / "project.json.tmp").unlink(missing_ok=True)
+                    raise
+            return public(project)
+
     @app.post("/api/projects/{project_id}/rig")
     def adjust_rig(project_id: str, selection: HeadSelection):
         with store.lock:
@@ -542,10 +619,14 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             if project_id in store.active or project["render"]["status"] == "ready":
                 return render_response(project)
             owner_id = request.state.user["id"]
-            if len(store.active) >= 2 or any(store.owner(pid) == owner_id for pid in store.active):
+            quota_owners = auth.guest_owners(owner_id)
+            if len(store.active) >= 2 or any(store.owner(pid) in quota_owners for pid in store.active):
                 fail(429, "capacity_busy", seconds=2)
             consume("render-user:" + owner_id, 30, 3600)
-            reservation = store.reserve(owner_id, config.video_bytes)
+            if guest_scope := auth.guest_scope(owner_id):
+                consume("render-guest:" + guest_scope, 30, 3600)
+                consume("render-ip:" + request.state.peer, 30, 3600)
+            reservation = store.reserve(owner_id, config.video_bytes, quota_owners=quota_owners)
             try:
                 project["render"] = {"status": "queued", "video_url": None, "error": None}
                 with progress_lock:
@@ -595,7 +676,10 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             project = store.read(project_id)
             path = store.path(project_id)
             portable = public(project)
-            if portable["settings"]["engine"] == "legacy":
+            # V1 stores only a rectangular selection. A painted mask requires
+            # V2's embedded foreground, which also supports the legacy engine.
+            if (portable["settings"]["engine"] == "legacy"
+                    and project["segmentation"].get("method") not in {"smart-brush", "manual-brush"}):
                 portable["settings"] = {key: portable["settings"][key]
                                         for key in ("mode", "motion", "bpm", "intensity")}
             foreground_data = (path / "foreground.png").read_bytes() if project["segmentation"]["available"] else None

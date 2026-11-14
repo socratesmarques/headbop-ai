@@ -137,6 +137,12 @@ class AuthStore:
                 );
                 CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user_id);
                 CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
+                CREATE TABLE IF NOT EXISTS guest_owners (
+                    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                    scope_hash TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS guest_scope ON guest_owners(scope_hash);
                 CREATE TABLE IF NOT EXISTS rate_limits (
                     bucket TEXT PRIMARY KEY,
                     count INTEGER NOT NULL,
@@ -180,7 +186,47 @@ class AuthStore:
 
     def list_users(self) -> list[dict]:
         with self._connect() as db:
-            return [self._user(row) for row in db.execute("SELECT * FROM users ORDER BY username")]
+            return [self._user(row) for row in db.execute(
+                "SELECT * FROM users WHERE id NOT IN (SELECT user_id FROM guest_owners) ORDER BY username")]
+
+    def create_guest(self, peer: str) -> dict:
+        """Create an unguessable browser identity without credentials or hashing work.
+
+        The network scope is private server metadata, never an authorization
+        credential. Several browsers on one network have distinct project owners
+        while sharing abuse budgets; clearing cookies cannot reset those budgets.
+        """
+        token, csrf, user_id = secrets.token_urlsafe(32), secrets.token_urlsafe(32), uuid4().hex
+        now = self.clock()
+        username = "guest-" + user_id
+        scope = hashlib.sha256(("guest-scope:" + peer).encode("utf-8")).hexdigest()
+        expires_at = now + self.session_ttl_seconds
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                db.execute("INSERT INTO users(id,username,password_hash,created_at,password_changed_at) VALUES(?,?,?,?,?)",
+                           (user_id, username, "!guest-no-password", now, now))
+                db.execute("INSERT INTO guest_owners VALUES(?,?,?)", (user_id, scope, now))
+                db.execute("INSERT INTO sessions VALUES(?,?,?,?,?,?)",
+                           (hashlib.sha256(token.encode("ascii")).hexdigest(), user_id, 1, csrf, now, expires_at))
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+        return {"token": token, "csrf": csrf, "expires_at": expires_at,
+                "user": {"id": user_id, "username": username, "guest": True}}
+
+    def guest_scope(self, user_id: str) -> str | None:
+        with self._connect() as db:
+            row = db.execute("SELECT scope_hash FROM guest_owners WHERE user_id=?", (user_id,)).fetchone()
+        return row["scope_hash"] if row is not None else None
+
+    def guest_owners(self, user_id: str) -> set[str]:
+        """Owners sharing the guest network budget, without exposing their projects."""
+        with self._connect() as db:
+            rows = db.execute("""SELECT user_id FROM guest_owners WHERE scope_hash=
+                                 (SELECT scope_hash FROM guest_owners WHERE user_id=?)""", (user_id,))
+            return {user_id, *(row["user_id"] for row in rows)}
 
     def authenticate(self, username: str, password: str) -> dict | None:
         try:
@@ -189,9 +235,10 @@ class AuthStore:
             normalized = ""
         with self._connect() as db:
             row = db.execute("SELECT * FROM users WHERE username=?", (normalized,)).fetchone()
+            guest = row is not None and db.execute("SELECT 1 FROM guest_owners WHERE user_id=?", (row["id"],)).fetchone()
         if not _verify_password(password, row["password_hash"] if row is not None else None):
             return None
-        if row is None or row["disabled"]:
+        if row is None or row["disabled"] or guest:
             return None
         return {"id": row["id"], "username": row["username"], "auth_version": row["auth_version"]}
 
@@ -212,7 +259,8 @@ class AuthStore:
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             try:
-                row = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+                row = db.execute("""SELECT u.*,g.user_id IS NOT NULL AS guest FROM users u
+                                    LEFT JOIN guest_owners g ON g.user_id=u.id WHERE u.id=?""", (user_id,)).fetchone()
                 if row is None or row["disabled"] or (auth_version is not None and row["auth_version"] != auth_version):
                     raise InvalidCredentialsError("auth.invalid_credentials")
                 db.execute("DELETE FROM sessions WHERE expires_at<=?", (now,))
@@ -228,23 +276,28 @@ class AuthStore:
             except Exception:
                 db.rollback()
                 raise
-        return {"token": token, "csrf": csrf,
-                "user": {"id": row["id"], "username": row["username"]}, "expires_at": expires_at}
+        user = {"id": row["id"], "username": row["username"]}
+        if row["guest"]:
+            user["guest"] = True
+        return {"token": token, "csrf": csrf, "user": user, "expires_at": expires_at}
 
     def get_session(self, token: str | None) -> dict | None:
         if not isinstance(token, str) or not _TOKEN.fullmatch(token):
             return None
         token_hash = hashlib.sha256(token.encode("ascii")).hexdigest()
         with self._connect() as db:
-            row = db.execute("""SELECT s.csrf,s.expires_at,u.id,u.username FROM sessions s
+            row = db.execute("""SELECT s.csrf,s.expires_at,u.id,u.username,g.user_id IS NOT NULL AS guest FROM sessions s
                                 JOIN users u ON s.user_id=u.id
+                                LEFT JOIN guest_owners g ON g.user_id=u.id
                                 WHERE s.token_hash=? AND s.expires_at>? AND u.disabled=0
                                   AND s.auth_version=u.auth_version""",
                              (token_hash, self.clock())).fetchone()
         if row is None:
             return None
-        return {"csrf": row["csrf"], "expires_at": row["expires_at"],
-                "user": {"id": row["id"], "username": row["username"]}}
+        user = {"id": row["id"], "username": row["username"]}
+        if row["guest"]:
+            user["guest"] = True
+        return {"csrf": row["csrf"], "expires_at": row["expires_at"], "user": user}
 
     def revoke_session(self, token: str | None) -> None:
         if not isinstance(token, str) or not _TOKEN.fullmatch(token):
@@ -317,10 +370,20 @@ class AuthStore:
                 db.rollback()
                 raise
 
-    def cleanup(self) -> None:
+    def cleanup(self, protected_user_ids=()) -> None:
         now = self.clock()
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute("DELETE FROM sessions WHERE expires_at<=?", (now,))
             db.execute("DELETE FROM rate_limits WHERE expires_at<=?", (now,))
+            # Projects may outlive their browser session. Keep their quota scope
+            # until normal project retention removes them, never orphan ownership.
+            protected = set(protected_user_ids)
+            expired = db.execute("""SELECT g.user_id FROM guest_owners g
+                                     WHERE g.created_at<? AND NOT EXISTS
+                                     (SELECT 1 FROM sessions s WHERE s.user_id=g.user_id)""",
+                                 (now - 86400,)).fetchall()
+            for row in expired:
+                if row["user_id"] not in protected:
+                    db.execute("DELETE FROM users WHERE id=?", (row["user_id"],))
             db.commit()

@@ -1,7 +1,7 @@
 """Exercise the production Compose configuration through locally trusted HTTPS.
 
 Run after building the application image:
-  python scripts/staging_smoke.py --image headbop-ai:pr3-fixes
+  python scripts/staging_smoke.py --image headbop-ai:public-studio
 Requires Docker Compose 2.24.4+ (ports !override), local Docker, ffprobe, and dev
 requirements. The isolated Compose project is stopped afterwards; named volumes
 are preserved. Only loopback ports are published. No DNS/ACME claim is made.
@@ -13,7 +13,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-import secrets
 import ssl
 import subprocess
 import tempfile
@@ -31,8 +30,8 @@ SELECTORS = ('DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_TLS', 'DOCKER_TLS_VERIFY',
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--image', default='headbop-ai:pr3-fixes')
-    parser.add_argument('--project', default='headbop-pr3-fixes-audit')
+    parser.add_argument('--image', default='headbop-ai:public-studio')
+    parser.add_argument('--project', default='headbop-public-studio-audit')
     parser.add_argument('--http-port', type=int, default=18084)
     parser.add_argument('--https-port', type=int, default=18444)
     args = parser.parse_args()
@@ -48,7 +47,7 @@ def main():
         completed = subprocess.run(command, input=input, text=True, capture_output=True,
                                    env=environment, cwd=ROOT, timeout=timeout)
         if completed.returncode:
-            # No command here includes passwords/tokens; account fixture uses stdin.
+            # No command here includes passwords or session tokens.
             raise RuntimeError(f'Command failed ({completed.returncode}): {command}\n{completed.stderr}')
         return completed.stdout
 
@@ -133,23 +132,20 @@ def main():
             for path in ('/api/projects', '/api/auth/session', '/openapi.json', '/api/projects/' + '0' * 32 + '/export'):
                 assert anonymous.get(path).status_code == 401, path
             result['anonymous_api_denied'] = True
-            unique = secrets.token_hex(4)
-            names = [f'audit-alice-{unique}', f'audit-bob-{unique}']
-            password = secrets.token_urlsafe(24)
-            provisioning = ('from headbop.auth import AuthStore\n'
-                            'from pathlib import Path\n'
-                            'auth=AuthStore(Path("/data/security.sqlite3"))\n'
-                            f'for name in {names!r}: auth.create_user(name, {password!r})\n')
-            run([*docker, 'exec', '-i', app_id, 'python', '-'], input=provisioning)
-            for account, name in ((alice, names[0]), (bob, names[1])):
-                logged = account.post('/api/auth/login', json={'username': name, 'password': password})
-                assert logged.status_code == 200, logged.status_code
-                cookie = logged.headers['set-cookie'].lower()
+            assert anonymous.post('/api/auth/guest', headers={'Origin': 'https://attacker.example'}).status_code == 403
+            identities = []
+            for account in (alice, bob):
+                opened = account.post('/api/auth/guest')
+                assert opened.status_code == 200, opened.text
+                cookie = opened.headers['set-cookie'].lower()
                 assert all(flag in cookie for flag in ('secure', 'httponly', 'samesite=strict'))
-                payload = logged.json()
-                assert 'token' not in payload
+                payload = opened.json()
+                assert 'token' not in payload and payload['user']['guest'] is True
+                identities.append(payload['user']['id'])
                 account.headers['X-CSRF-Token'] = payload['csrf']
-            result['secure_individual_login'] = True
+                assert account.post('/api/auth/guest').json() == payload
+            assert identities[0] != identities[1]
+            result['secure_private_guest_sessions_without_provisioning'] = True
             assert alice.post('/api/auth/logout', headers={'X-CSRF-Token': ''}).status_code == 403
             assert alice.post('/api/auth/logout', headers={'Origin': 'https://attacker.example'}).status_code == 403
             result['csrf_and_origin_denied'] = True
@@ -165,7 +161,7 @@ def main():
             assert root_write.splitlines() == ['False', 'True']
             result['container_limits'] = {'uid': 10001, 'cpus': 2, 'memory_gib': 4, 'pids': 128,
                                           'read_only_root': True, 'private_backend': True, 'cap_drop_all': True}
-            step('Checking authenticated upload, H.264/AAC rendering and XML roundtrip')
+            step('Checking guest upload, intelligent painting, H.264/AAC rendering and XML roundtrip')
             image, audio = media_files(directory)
             uploaded = alice.post('/api/projects', files={
                 'image': (image.name, image.read_bytes(), 'image/png'),
@@ -174,8 +170,29 @@ def main():
             assert uploaded.status_code == 201, uploaded.text
             project = uploaded.json()
             prefix = '/api/projects/' + project['id']
+            assert alice.get(prefix + '/render').json()['status'] == 'idle'
+            assert alice.get(prefix + '/video').status_code == 409
+            paint_request = {'strokes': [{'points': [[.5, .25], [.5, .45]], 'radius': .04, 'mode': 'add'}],
+                             'smart': True, 'base': 'empty'}
+            assert alice.post(prefix + '/paint', json=paint_request, headers={'X-CSRF-Token': ''}).status_code == 403
+            assert bob.post(prefix + '/paint', json=paint_request).status_code == 404
+            painted = alice.post(prefix + '/paint', json=paint_request)
+            assert painted.status_code == 200, painted.text
+            project = painted.json()
+            assert project['settings']['mode'] == 'subject'
+            assert project['segmentation']['method'] == 'smart-brush'
+            assert alice.get(prefix + '/render').json()['status'] == 'idle'
+            assert alice.get(prefix + '/video').status_code == 409
+            foreground = alice.get(project['foreground_url'])
+            assert foreground.status_code == 200
+            from io import BytesIO
+            from PIL import Image
+            alpha = Image.open(BytesIO(foreground.content)).getchannel('A')
+            assert alpha.getextrema() == (0, 255)
+            assert alpha.getpixel((160, 80)) == 255 and alpha.getpixel((20, 20)) == 0
+            result['smart_brush_selects_head_and_waits_for_explicit_render'] = True
             update = alice.put(prefix + '/settings', json={
-                **project['settings'], 'mode': 'whole', 'fps': 30, 'resolution': 720, 'aspect': 'vertical',
+                **project['settings'], 'mode': 'subject', 'fps': 30, 'resolution': 720, 'aspect': 'vertical',
             })
             assert update.status_code == 200, update.text
             project = update.json()
@@ -185,7 +202,7 @@ def main():
             assert bob.delete(prefix).status_code == 404
             assert bob.post(prefix + '/render').status_code == 404
             assert bob.put(prefix + '/settings', json=project['settings']).status_code == 404
-            result['cross_account_denied'] = True
+            result['cross_guest_denied'] = True
             start = alice.post(prefix + '/render')
             assert start.status_code == 202, start.text
             samples = []
@@ -218,7 +235,16 @@ def main():
             assert imported.status_code == 201, imported.text
             assert imported.json()['keyframes'] == project['keyframes']
             result['xml_roundtrip'] = True
-            step('Restarting application; checking persistent sessions, media and login rate limits')
+            assert alice.get(imported.json()['foreground_url']).content == foreground.content
+            quota_projects = [imported.json()['id']]
+            for _ in range(8):
+                extra = alice.post('/api/import', files={'file': ('project.xml', exported.content, 'application/xml')})
+                assert extra.status_code == 201, extra.text
+                quota_projects.append(extra.json()['id'])
+            quota = bob.post('/api/projects', content=b'invalid')
+            assert quota.status_code == 429 and quota.json()['code'] == 'quota_projects', quota.text
+            result['new_guest_cannot_reset_shared_project_quota'] = True
+            step('Restarting application; checking persistent guest sessions, media, quotas and rate limits')
             run([*compose, 'restart', 'app'])
             for _ in range(80):
                 try:
@@ -233,21 +259,25 @@ def main():
             assert alice.get(prefix + '/render').json()['progress'] == 100
             assert bob.get(prefix).status_code == 404
             result['restart_preserves_sessions_ownership_mp4'] = True
-            assert alice.delete('/api/projects/' + imported.json()['id']).status_code == 204
+            quota_after_restart = bob.post('/api/projects', content=b'invalid')
+            assert quota_after_restart.status_code == 429 and quota_after_restart.json()['code'] == 'quota_projects'
+            for project_id in quota_projects:
+                assert alice.delete('/api/projects/' + project_id).status_code == 204
             assert alice.delete(prefix).status_code == 204
             assert alice.get(prefix).status_code == 404
             # Different spoofed XFF values must not evade Caddy's observed-IP bucket.
-            login_statuses = []
+            guest_statuses = []
             for index in range(12):
-                failed = anonymous.post('/api/auth/login', headers={'X-Forwarded-For': f'203.0.113.{index + 1}'},
-                                        json={'username': f'unknown-{unique}-{index}', 'password': 'invalid-password-123'})
-                login_statuses.append(failed.status_code)
-                if failed.status_code == 429:
-                    assert int(failed.headers['Retry-After']) > 0
+                anonymous.cookies.clear()
+                opened = anonymous.post('/api/auth/guest', headers={'X-Forwarded-For': f'203.0.113.{index + 1}'})
+                guest_statuses.append(opened.status_code)
+                if opened.status_code == 429:
+                    assert int(opened.headers['Retry-After']) > 0
                     break
-                assert failed.status_code == 401
-            assert 429 in login_statuses
-            result['xff_spoof_does_not_bypass_login_limit'] = True
+                assert opened.status_code == 200
+            assert guest_statuses.count(200) == 8 and guest_statuses[-1] == 429, guest_statuses
+            result['xff_spoof_and_cookie_reset_do_not_bypass_guest_limit'] = True
+            assert alice.post('/api/auth/guest').status_code == 200
             run([*compose, 'restart', 'app'])
             for _ in range(80):
                 try:
@@ -256,7 +286,8 @@ def main():
                 except httpx.TransportError:
                     pass
                 time.sleep(0.25)
-            limited = anonymous.post('/api/auth/login', json={'username': names[0], 'password': password})
+            anonymous.cookies.clear()
+            limited = anonymous.post('/api/auth/guest')
             assert limited.status_code == 429
             result['rate_limit_survives_restart'] = True
             response = httpx.get(f'http://localhost:{args.http_port}/', follow_redirects=False, timeout=10)
@@ -264,7 +295,7 @@ def main():
             result['http_redirect'] = 308
             result['image_id'] = inspected['Image']
             result['passed'] = True
-            step('PASS: production Compose, trusted local TLS, auth/CSRF/ownership, video/XML, persistence and rate limits')
+            step('PASS: production Compose, trusted local TLS, guest/CSRF/ownership, smart brush/video/XML, persistence and abuse limits')
         finally:
             for instance in locals().get('clients', []):
                 instance.close()

@@ -60,14 +60,31 @@ O progresso usa os quadros enviados e reserva a conclusão para a saída validad
 requisições em SQLite. `security.py` aplica origem, CSRF e admissão. `.owner` associa
 cada projeto à sua conta; IDs de outro usuário recebem 404 em todas as rotas.
 Projetos antigos sem dono só ficam acessíveis após adoção explícita pela CLI.
-`auth.js` apresenta login/histórico e limpa a página ao trocar de conta. `i18n.js`
+`auth.js` abre uma sessão anônima ao entrar no estúdio e apresenta o histórico
+privado desse navegador. A home não cria sessões para visitantes que só leem.
+Sessões de convidados na mesma rede compartilham cotas de disco/projetos, limites
+de operações e admissão; a associação é metadado privado, não autorização de mídia. `i18n.js`
 usa bindings explícitos para textos e atributos, sem MutationObserver contínuo.
 
 ## UI e API
 
 APIs anteriores preservadas. Novos projetos recebem settings v2 e modo automático;
-O frontend inicia a renderização após a análise. GET project fornece `rig`,
+O frontend abre o pincel após a análise e aguarda uma seleção explícita antes do render. GET project fornece `rig`,
 `mask_url` e `capabilities.reference_available=false`. POST `/api/projects/{id}/rig`
 recebe `head_rect` normalizado. O controle manual do personagem inteiro continua
 em POST `/api/projects/{id}/segment`. PUT settings invalida o vídeo e regenera a
 timeline. Exportar um projeto sem editar controles não recalcula seus frames.
+
+## Pincel inteligente
+
+`brush.js` mantém traços normalizados com mouse, toque ou teclado, incluindo
+borracha, desfazer/refazer e tamanho. A API só é chamada ao aplicar, com até 100
+traços/5000 pontos e corpo limitado a 256 KiB. `painting.py` combina sementes de
+foreground/background com GrabCut e filtra componentes não marcados, mantendo alfa
+e cores da origem. O modo manual rasteriza os traços sem expandi-los.
+
+POST `/api/projects/{id}/paint` aceita `{strokes,smart,base}`; `base` é `empty`
+ou `current` para refinar uma máscara salva. Máscara, rig e metadados são preparados
+antes da troca dos arquivos; falhas restauram a seleção e o vídeo anteriores.
+Pintura usa uma camada única até articulação explícita. Máscaras pintadas exportam
+XML v2, inclusive no motor `legacy`, para preservar a seleção arbitrária.

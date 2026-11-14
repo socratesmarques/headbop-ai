@@ -26,6 +26,7 @@ jobs:
           mkdir -p test-results
           python scripts/browser_smoke.py 2>&1 | tee test-results/browser-command.log
           python scripts/i18n_browser_test.py
+          python scripts/brush_browser_test.py
       - name: Browser failure summary
         if: failure()
         run: |

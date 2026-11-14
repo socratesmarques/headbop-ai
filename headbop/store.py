@@ -129,10 +129,16 @@ class Store:
                         and time.time() - path.stat().st_mtime > self.ttl):
                     shutil.rmtree(path)
 
-    def usage(self, owner_id=None):
+    def owner_ids(self):
+        with self.lock:
+            return {owner for path in self.paths() if (owner := self.owner(path.name)) is not None}
+
+    def usage(self, owner_id=None, *, owners=None):
         count, size = 0, 0
         for path in self.paths():
-            if owner_id is not None and self.owner(path.name) != owner_id:
+            if owners is not None and self.owner(path.name) not in owners:
+                continue
+            if owners is None and owner_id is not None and self.owner(path.name) != owner_id:
                 continue
             count += 1
             for file in path.rglob("*"):
@@ -143,16 +149,19 @@ class Store:
                     pass  # Renderers atomically replace partial output.
         return count, size
 
-    def reserve(self, owner_id, size, *, projects=0):
+    def reserve(self, owner_id, size, *, projects=0, quota_owners=None):
         """Called before parsing uploads or queueing native work, under one lock."""
         with self.lock:
             self.cleanup()
             global_count, global_size = self.usage()
-            user_count, user_size = self.usage(owner_id)
+            # Guest browsers from one network have isolated ownership but share
+            # this admission budget, so removing a cookie cannot reset disk use.
+            owners = {owner_id} if quota_owners is None else set(quota_owners) | {owner_id}
+            user_count, user_size = self.usage(owners=owners)
             for reservation in self.reservations.values():
                 global_count += reservation["projects"]
                 global_size += reservation["size"]
-                if reservation["owner"] == owner_id:
+                if reservation["owner"] in owners:
                     user_count += reservation["projects"]
                     user_size += reservation["size"]
             if global_count + projects > self.max_projects or user_count + projects > self.user_max_projects:

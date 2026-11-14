@@ -1,4 +1,4 @@
-# Single-host deployment with individual accounts; see docs/PRODUCTION.md.
+# Single-host deployment with private automatic guest sessions; see docs/PRODUCTION.md.
 services:
   app:
     build: .
