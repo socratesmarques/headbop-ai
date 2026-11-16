@@ -1,67 +1,60 @@
 # Headbop AI 2.0
 
-Transforme uma imagem e um trecho de música em uma animação de headbop, usando
-Python/FastAPI, Librosa, OpenCV e FFmpeg na CPU. O preview reproduz o **mesmo MP4**
-que será baixado. Sem serviços externos obrigatórios, GPU, conta ou chaves de API.
+Crie animações de headbop a partir de uma imagem e um trecho de áudio. A aplicação roda na CPU com Python, FastAPI, Librosa, OpenCV e FFmpeg, sem exigir GPU, conta ou chave de API. O preview exibe o mesmo MP4 disponível para download.
 
-A versão 2.0 já está integrada à `main`. Os comandos de instalação abaixo usam
-essa branch.
+## O que oferece
 
-## Fluxo de uso
+- Seleção da área animada por pincel com reconhecimento opcional de bordas, ou pela imagem inteira.
+- Articulação opcional da cabeça e presets **Auto**, **Smooth**, **Hard** e **Velocity**.
+- Ajustes de BPM, velocidade, easing e squash/stretch.
+- Exportação de vídeo em **MP4** (24, 30 ou 60 fps; formatos original, quadrado e vertical) e projeto editável em **XML Headbop**.
+- Interface em 8 idiomas e indicador de progresso durante a renderização.
 
-1. Na home, clique em **Criar meu vídeo**. Não é necessário cadastro ou login.
-2. Envie uma imagem PNG/JPEG/WebP e um áudio de 0,5 a 30 segundos. Clique em
-   **Analisar e criar**: a análise encontra a batida e abre o editor, sem gerar vídeo.
-3. **Pinte a área animada** por dentro da parte que deve se mover. O pincel
-   inteligente reconhece bordas ao aplicar; use **Apagar**, **Desfazer/Refazer** e
-   ajuste o tamanho para refinar. Desative **Reconhecer bordas** para pintura exata.
-4. Clique em **Aplicar seleção** e confira a máscara. As partes selecionadas se
-   movem juntas; o restante compõe o fundo. **Imagem inteira** continua opcional.
-5. Ajuste o movimento e clique em **Gerar preview**. Confira o vídeo com áudio,
-   baixe o **MP4** ou salve o projeto **XML Headbop**.
+## Como usar
 
-**Pintar área animada** escolhe os pixels que se movem. **Articular cabeça
-(opcional)** separa a cabeça dentro de um personagem já selecionado e define seu
-pivô de giro; não substitui a pintura. O recorte por retângulo continua disponível
-como ferramenta alternativa. Não é preciso marcar uma cabeça para animar a pintura.
+1. Abra o estúdio em **Criar meu vídeo** e envie uma imagem PNG/JPEG/WebP e um áudio de **0,5 a 30 segundos**.
+2. Clique em **Analisar e criar**, pinte a área que deve se mover e escolha **Aplicar seleção**.
+3. Ajuste o movimento e clique em **Gerar preview**.
+4. Confira o resultado e baixe o MP4 ou salve o XML para editar depois.
 
-A home inclui apresentação do projeto e [link para o repositório](https://github.com/socratesmarques/headbop-ai).
-O espaço de criação é privado por navegador e temporário. Salve o XML antes de
-expirar a sessão ou limpar os cookies; ele permite continuar em outro dispositivo.
+Não é necessário login. As sessões são temporárias: salve o XML para continuar o projeto em outro momento ou dispositivo.
 
-## Presets e controles
+## Requisitos
 
-| Controle | Comportamento |
-| --- | --- |
-| Auto | Escolhe uma resposta mais suave ou com impulso conforme energia e regularidade |
-| Smooth | Antecipação e recuperação suaves |
-| Hard | Acentos mais marcados, com transição contínua |
-| Velocity | Impulso, overshoot e recuperação amortecida |
-| BPM | Mantém as batidas medidas quando próximo da estimativa; outro valor cria uma grade regular |
-| Velocidade | Altera a duração do gesto ao redor da batida, sem acelerar o áudio |
-| Easing | Curvas Bézier natural/ease-in-out ou interpolação linear |
-| Squash/stretch | Deformação controlada, com fatores horizontal/vertical recíprocos |
-| Motor original | Preserva o comportamento de projetos antigos |
+- **Python 3.12** recomendado (compatível com versões >=3.12 e <3.14).
+- **Git** e **FFmpeg** com suporte a H.264 (`libx264`) e AAC no `PATH`.
+- **Linux:** `libsndfile1`. Não é necessário Node.js.
 
-**Não há preset de referência ativo:** nenhum vídeo de referência estava acessível
-nesta implementação. Os exemplos comparam os motores original e 2.0; não constituem
-comparação com um vídeo externo.
+## Windows (PowerShell)
 
-Saída a **24, 30 ou 60 fps**, com formatos original, quadrado e vertical. O padrão
-640 mantém o custo baixo. Os presets 720 e 1080 permitem HD e Full HD: vertical
-720×1280 ou 1080×1920; quadrado 720×720 ou 1080×1080. No formato original, o lado
-curto mira 720/1080, com o lado longo limitado a 1280/1920. A imagem cabe no canvas
-sem corte intencional; o movimento ainda pode alcançar as bordas. Resoluções altas
-e 60 fps custam mais CPU. Aumentar resolução não recupera detalhe ausente na imagem.
+Instale os pré-requisitos:
 
-## Instalação em Linux/Kali
+```powershell
+winget install --id Git.Git -e
+winget install --id Python.Python.3.12 -e
+winget install --id Gyan.FFmpeg -e
+```
 
-Python **3.12** recomendado; FFmpeg com `libx264` e `aac` é obrigatório. Não é
-necessário Node.js para executar a aplicação.
+Abra um **novo PowerShell** e execute:
+
+```powershell
+git clone --branch main https://github.com/socratesmarques/headbop-ai.git
+cd headbop-ai
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.lock
+.\.venv\Scripts\python.exe -m pip install --no-deps -e .
+$env:HEADBOP_ENV="development"
+$env:HEADBOP_PUBLIC_ORIGIN="http://127.0.0.1:8000"
+.\.venv\Scripts\python.exe -m uvicorn headbop.main:app --host 127.0.0.1 --port 8000 --workers 1
+```
+
+## Linux / Kali
+
+Instale o Python 3.12 se ele ainda não estiver disponível na distribuição. Não substitua o Python do sistema.
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y python3-venv ffmpeg libsndfile1
+sudo apt-get install -y git python3-venv ffmpeg libsndfile1
 git clone --branch main https://github.com/socratesmarques/headbop-ai.git
 cd headbop-ai
 python3.12 -m venv .venv
@@ -73,142 +66,44 @@ export HEADBOP_PUBLIC_ORIGIN=http://127.0.0.1:8000
 uvicorn headbop.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
-Se a distribuição oferecer apenas outra versão do Python, instale Python 3.12
-com o gerenciador recomendado pela distribuição. Não substitua o Python do sistema.
-A primeira análise pode demorar mais pela compilação do Numba.
-
-## Instalação em Windows
-
-PowerShell, Python 3.12 e FFmpeg no `PATH`:
-
-```powershell
-winget install Python.Python.3.12
-winget install Gyan.FFmpeg
-# Abra um novo terminal após a instalação.
-git clone --branch main https://github.com/socratesmarques/headbop-ai.git
-cd headbop-ai
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.lock
-.\.venv\Scripts\python.exe -m pip install --no-deps -e .
-$env:HEADBOP_ENV="development"
-$env:HEADBOP_PUBLIC_ORIGIN="http://127.0.0.1:8000"
-.\.venv\Scripts\python.exe -m uvicorn headbop.main:app --host 127.0.0.1 --port 8000 --workers 1
-```
-
-As instruções Windows são documentadas, mas esta entrega foi executada em Linux.
-Abra o endereço local informado pelo Uvicorn e clique em **Criar meu vídeo**. Para
-acesso por outros dispositivos, configure a origem HTTPS conforme o guia de
-implantação. Safari/iPhone físico ainda requer validação própria.
+Depois de iniciar, acesse **http://127.0.0.1:8000**. Encerre o servidor com `Ctrl+C`.
 
 ## Docker
 
 ```bash
 docker build -t headbop-ai .
-docker run -d --name headbop -p 127.0.0.1:8000:8000 -v headbop_data:/data \
-  -e HEADBOP_DATA_DIR=/data -e HEADBOP_ENV=development \
+docker run -d --name headbop -p 127.0.0.1:8000:8000 \
+  -v headbop_data:/data -e HEADBOP_DATA_DIR=/data \
+  -e HEADBOP_ENV=development \
   -e HEADBOP_PUBLIC_ORIGIN=http://127.0.0.1:8000 headbop-ai
 ```
 
-O contêiner usa usuário sem privilégios e inclui FFmpeg. O volume preserva
-sessões e projetos entre reinícios; os projetos expiram conforme o TTL. Em ambiente com proxy TLS, o Dockerfile aceita um certificado confiável
-via BuildKit: `--secret id=proxy_ca,src=/caminho/ca-bundle.pem`; a verificação TLS
-permanece habilitada e o certificado não é incorporado à imagem.
+O volume preserva os arquivos entre reinícios do contêiner, respeitando o prazo de expiração dos projetos.
 
-## Projetos e compatibilidade
+## Projetos e limites
 
-- Projetos e XML **v1** mantêm o motor original e seus keyframes. Ler um projeto
-  antigo não o migra. A troca para o motor 2.0 é explícita.
-- Projetos **v2** armazenam os controles novos, os keyframes por camada, a seleção
-  da cabeça e o recorte. A importação restaura a timeline em vez de recalculá-la.
-- A exportação do motor original continua produzindo XML v1. Se você pintar uma
-  seleção nesse motor, o XML passa a v2 para guardar a máscara, mantendo o motor
-  original e seus parâmetros. O motor 2.0 também produz XML v2.
-- O MP4 continua independente do XML. Preserve o MP4 para uma cópia visual final.
+- **XML v1** mantém o motor original; **XML v2** guarda máscaras, camadas e controles do motor 2.0. A importação preserva a timeline.
+- O **MP4** é o vídeo final; o **XML** permite retomar a edição e incorpora as mídias — tenha cuidado ao compartilhá-lo.
+- Cada arquivo enviado tem limite de **20 MiB**; o prazo padrão das sessões é **24 horas**.
+- Os arquivos são processados no servidor onde a aplicação é executada, sem envio obrigatório a serviços externos.
 
-## Testes e exemplos reproduzíveis
+## Testes
+
+Com o ambiente configurado, execute os testes unitários e a análise estática:
 
 ```bash
-. .venv/bin/activate
+# Linux (venv ativado)
 python -m pytest -q
-ruff check .
-python -m playwright install chromium
-python scripts/browser_smoke.py
-python scripts/i18n_browser_test.py
-python scripts/brush_browser_test.py
-python scripts/render_comparison.py --help
+python -m ruff check .
 ```
 
-O navegador do smoke precisa reproduzir H.264/AAC. Algumas distribuições de
-Chromium não incluem esses codecs. Nesse caso, use Chrome instalado, por exemplo
-`HEADBOP_BROWSER_EXECUTABLE=/usr/bin/google-chrome python scripts/browser_smoke.py`
-no Linux. A CI usa o Chrome disponível no runner Ubuntu 24.04. A variável também
-aceita outro caminho de executável; `playwright` força o navegador empacotado.
+No Windows, substitua `python` por `.\.venv\Scripts\python.exe`. Para testes de navegador e resultados de desempenho, consulte [o relatório da v2](docs/REPORT_V2.md) e a [CI da main](https://github.com/socratesmarques/headbop-ai/actions?query=branch%3Amain).
 
-O smoke test cria seu próprio servidor e arquivos temporários; testa upload,
-preview, MP4, XML, controles e interação móvel. Screenshots e diagnósticos ficam
-em `test-results/` (ignorado pelo Git). A comparação de motores usa mídia sintética
-reproduzível e produz vídeos e uma folha de quadros; consulte o `--help` para as
-opções e [relatório de implementação e validação](docs/REPORT_V2.md) para os
-resultados e o desempenho medidos durante a evolução. O relatório registra o
-estado anterior ao [merge do PR #1](https://github.com/socratesmarques/headbop-ai/pull/1).
-Consulte os resultados atuais na
-[CI da main](https://github.com/socratesmarques/headbop-ai/actions?query=branch%3Amain).
+## Configuração e implantação
 
+- Variáveis disponíveis em [`.env.example`](.env.example). Defina-as no ambiente do processo; o `.env` não é carregado automaticamente.
+- Execute com **um único worker**, pois a fila de renderização é local.
+- Para publicar com domínio, HTTPS, limites e persistência, siga [docs/PRODUCTION.md](docs/PRODUCTION.md).
+- Consulte também [arquitetura](docs/ARCHITECTURE.md) e [limitações](docs/LIMITATIONS.md).
 
-## Idiomas e progresso
-
-A interface permite selecionar português, inglês, espanhol, francês, alemão,
-italiano, chinês simplificado e hindi. A escolha é lembrada pelo navegador
-quando o armazenamento local está habilitado. Os catálogos completos incluem textos dinâmicos, erros, instruções e atributos
-de acessibilidade. A troca de idioma atualiza esses textos sem observar mutações
-da página nem enviar texto para tradutores externos.
-
-O carregamento de uploads e a análise inicial são **indeterminados**: não há
-porcentagem real disponível nessa etapa. Durante a geração do MP4, a API de
-status retorna `progress` (0–100) baseado em quadros processados, reservando
-os últimos 5% para a conclusão do FFmpeg. Isso **não é** uma previsão de tempo
-restante. O indicador chega a 100% somente com vídeo finalizado.
-
-## Publicação
-
-Consulte [o guia de implantação pública](docs/PRODUCTION.md) e o
-[registro da home e do pincel](docs/PUBLIC_STUDIO_VALIDATION.md).
-O uso é livre, sem contas provisionadas pelo administrador. Sessões automáticas
-isolam os projetos e preservam as proteções de origem/CSRF. Cotas e limites por
-navegador e rede impedem que limpar cookies reinicie o orçamento de uso. A implantação suporta uma única instância;
-DNS/HTTPS público, carga real, backup e operação precisam ser validados no host final.
-
-## Configuração e privacidade
-
-| Variável | Padrão |
-| --- | --- |
-| `HEADBOP_DATA_DIR` | `/tmp/headbop-ai` |
-| `HEADBOP_TTL_HOURS` | `24` |
-| `HEADBOP_MAX_PROJECTS` | `50` |
-| `HEADBOP_ENV` | `production` |
-| `HEADBOP_PUBLIC_ORIGIN` | obrigatório HTTPS em produção |
-| `HEADBOP_USER_MAX_PROJECTS` | `10` |
-| `HEADBOP_USER_STORAGE_MIB` | `256` |
-| `HEADBOP_MAX_STORAGE_MIB` | `2048` |
-| `HEADBOP_RENDER_TIMEOUT_SECONDS` | `300` |
-| `HEADBOP_MAX_VIDEO_MIB` | `64` |
-
-Veja [.env.example](.env.example). As variáveis devem ser exportadas no processo;
-`.env` não é carregado automaticamente. Use **um único worker**, porque a fila é
-local. `/api/health` é público; a API de projetos e `/openapi.json` exigem a sessão
-criada automaticamente ao abrir o estúdio. Não configure contas para liberar o uso.
-Projetos antigos podem ser importados por XML; veja o guia de migração.
-
-Cada mídia enviada tem limite de 20 MiB; imagens até 16 megapixels são normalizadas
-para até 1600 pixels de lado. XML tem limite de 56 MiB. Processamento e armazenamento
-acontecem no servidor local, sem envio da mídia a serviços de IA. A limpeza ocorre
-periodicamente; também é possível excluir a sessão. O XML incorpora as mídias:
-compartilhá-lo compartilha seu conteúdo.
-
-Projetos são isolados por sessão do navegador. A configuração de produção exige
-HTTPS e aplica limites de recursos e de requisições. Arquivos temporários não têm
-backup automático. Mais detalhes em [arquitetura](docs/ARCHITECTURE.md),
-[limitações](docs/LIMITATIONS.md) e [histórico do plano da evolução](docs/ENGINE_V2_PLAN.md).
-
-Licença [MIT](LICENSE). A fotografia usada em testes tem atribuição própria em
-[tests/fixtures/ATTRIBUTION.md](tests/fixtures/ATTRIBUTION.md).
+Licença [MIT](LICENSE). Atribuição da imagem de teste em [tests/fixtures/ATTRIBUTION.md](tests/fixtures/ATTRIBUTION.md).
